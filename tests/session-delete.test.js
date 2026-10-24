@@ -22,7 +22,7 @@ const children = new Set();
 let audioBehavior = {},
   recorder;
 
-function wave(file, finalized = true) {
+function wave(file, finalized = true, sampleRate = 48000) {
   const bytes = Buffer.alloc(44 + 480 * 4);
   bytes.write('RIFF', 0);
   bytes.writeUInt32LE(finalized ? bytes.length - 8 : 36, 4);
@@ -30,8 +30,8 @@ function wave(file, finalized = true) {
   bytes.writeUInt32LE(16, 16);
   bytes.writeUInt16LE(1, 20);
   bytes.writeUInt16LE(2, 22);
-  bytes.writeUInt32LE(48000, 24);
-  bytes.writeUInt32LE(192000, 28);
+  bytes.writeUInt32LE(sampleRate, 24);
+  bytes.writeUInt32LE(sampleRate * 4, 28);
   bytes.writeUInt16LE(4, 32);
   bytes.writeUInt16LE(16, 34);
   bytes.write('data', 36);
@@ -83,6 +83,7 @@ childProcess.spawn = (command, args) => {
   assert.equal(command, 'dotnet', 'Deletion tests must never launch real helpers.');
   const behavior = { ...audioBehavior };
   const output = args[args.indexOf('--output') + 1];
+  const sampleRate = Number(args[args.indexOf('--sample-rate') + 1]);
   const child = fakeChild(() => {
     if (!behavior.manualStop) setImmediate(() => child.complete());
   });
@@ -92,14 +93,15 @@ childProcess.spawn = (command, args) => {
       type: 'ready',
       startedUnixMs: Date.now(),
       startedMonotonicMs: Number(process.hrtime.bigint()) / 1e6,
+      sampleRate,
     });
   child.complete = () => {
     if (child.exitCode !== null) return;
-    wave(output);
+    wave(output, true, sampleRate);
     child.message({ type: 'stopped', frames: 480, peak: 0, silent: true, discontinuities: 0 });
     child.finish();
   };
-  wave(output, false);
+  wave(output, false, sampleRate);
   recorder = child;
   if (!behavior.manualReady) setImmediate(child.ready);
   return child;

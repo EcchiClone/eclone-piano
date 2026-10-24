@@ -26,6 +26,7 @@ const MIME = {
   '.mid': 'audio/midi',
 };
 const now = () => performance.now() / 1000;
+const AUDIO_SAMPLE_RATES = [44100, 48000];
 const defaultSettings = {
   theme: 'aurora',
   background: 'dark',
@@ -41,6 +42,7 @@ const defaultSettings = {
   overlayKeyboard: true,
   overlayNoteOpacity: 0.6,
   overlayKeyboardOpacity: 0.18,
+  audioSampleRate: 44100,
 };
 const demo = {
   id: 'demo',
@@ -82,6 +84,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       ...JSON.parse(await fs.readFile(path.join(DATA, 'settings.json'), 'utf8')),
     };
   } catch {}
+  if (!AUDIO_SAMPLE_RATES.includes(settings.audioSampleRate)) settings.audioSampleRate = 44100;
   let rememberedInputName = null,
     initialPortsSeen = false,
     connectionSave = Promise.resolve(),
@@ -344,7 +347,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         bytes !== stat.size - 44 ||
         !bytes ||
         header.readUInt16LE(20) !== 1 ||
-        rate !== 48000 ||
+        !AUDIO_SAMPLE_RATES.includes(rate) ||
         align !== 4 ||
         header.readUInt16LE(22) !== 2 ||
         header.readUInt16LE(34) !== 16 ||
@@ -548,7 +551,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       });
     });
   }
-  function startCapture(id, pid) {
+  function startCapture(id, pid, sampleRate) {
     let resolveReady, rejectReady, resolveDone;
     const run = {
       id,
@@ -576,7 +579,15 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     };
     const child = (run.child = spawn(
       'dotnet',
-      [helper, '--pid', String(pid), '--output', path.join(DATA, id + '.wav')],
+      [
+        helper,
+        '--pid',
+        String(pid),
+        '--output',
+        path.join(DATA, id + '.wav'),
+        '--sample-rate',
+        String(sampleRate),
+      ],
       { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
     ));
     const timeout = setTimeout(() => {
@@ -592,6 +603,12 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         return;
       }
       if (msg.type === 'ready' && !run.ready) {
+        if (msg.sampleRate !== sampleRate) {
+          fail(
+            new Error('오디오 도우미의 샘플레이트가 요청과 다릅니다. 도우미를 다시 빌드해 주세요.'),
+          );
+          return;
+        }
         if (!Number.isFinite(msg.startedUnixMs)) {
           fail(new Error('오디오 도우미가 올바른 시작 시각을 반환하지 않았습니다.'));
           return;
@@ -715,7 +732,10 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         if (!existsSync(helper)) throw new Error('오디오 도우미를 빌드한 뒤 다시 시도하세요.');
         if (!Number.isInteger(payload.pid) || payload.pid <= 0)
           throw new Error('녹음할 Kontakt 프로세스를 선택하세요.');
-        audio = run = startCapture(id, payload.pid);
+        const sampleRate = payload.sampleRate ?? settings.audioSampleRate;
+        if (!AUDIO_SAMPLE_RATES.includes(sampleRate))
+          throw new Error('Kontakt 샘플레이트는 44,100 또는 48,000 Hz를 선택하세요.');
+        audio = run = startCapture(id, payload.pid, sampleRate);
         await run.readyPromise;
         startedAt = run.startedAt;
         if (run.closed || run.error)
@@ -838,6 +858,8 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         break;
       case 'settings': {
         const p = msg.settings || {};
+        if (AUDIO_SAMPLE_RATES.includes(p.audioSampleRate))
+          settings.audioSampleRate = p.audioSampleRate;
         for (const key of ['theme', 'background', 'direction'])
           if (
             {
@@ -918,14 +940,18 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         break;
       }
       case 'pause':
-        transport.position += transport.playing ? now() - transport.startedAt : 0;
+        transport.position = Number.isFinite(msg.position)
+          ? Math.min(transportDuration, Math.max(0, msg.position))
+          : transport.position + (transport.playing ? now() - transport.startedAt : 0);
         transport.playing = false;
         transport.startedAt = now();
+        delete transport.reason;
         publish();
         break;
       case 'seek':
         transport.position = Math.min(transportDuration, Math.max(0, Number(msg.position) || 0));
         transport.startedAt = now();
+        delete transport.reason;
         publish();
         break;
       case 'record': {
@@ -952,7 +978,170 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
   }
   const exportUploads = new Map(),
     maxExportBytes = 4 * 1024 * 1024 * 1024;
-  let exportStarts = 0;
+  let exportStarts = 0,
+    exportToolsPromise;
+  function exportTool(command, args, upload, timeout = 0) {
+    return new Promise((resolve) => {
+      let stdout = '',
+        stderr = '',
+        spawnError,
+        timer;
+      const proc = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      if (upload) upload.process = proc;
+      proc.stdout.on('data', (data) => {
+        if (stdout.length < 262144) stdout += data;
+      });
+      proc.stderr.on('data', (data) => {
+        if (stderr.length < 16384) stderr += data;
+      });
+      proc.once('error', (error) => {
+        spawnError = error;
+      });
+      proc.once('close', (code) => {
+        clearTimeout(timer);
+        if (upload?.process === proc) upload.process = null;
+        resolve({ ok: code === 0 && !spawnError, stdout, stderr, error: spawnError });
+      });
+      if (timeout) timer = setTimeout(() => proc.kill(), timeout);
+    });
+  }
+  function requireExportTools() {
+    return (exportToolsPromise ??= Promise.all([
+      exportTool('ffmpeg', ['-version'], null, 5000),
+      exportTool('ffprobe', ['-version'], null, 5000),
+    ])
+      .then((results) => {
+        if (results.some((result) => !result.ok))
+          throw new Error(
+            '고정 60fps 영상 내보내기에는 FFmpeg와 FFprobe가 필요합니다. 설치 후 다시 시도하세요.',
+          );
+      })
+      .catch((error) => {
+        exportToolsPromise = null;
+        throw error;
+      }));
+  }
+  async function finishFrameExport(upload) {
+    const probe = await exportTool(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-f',
+        'h264',
+        '-count_frames',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=codec_name,width,height,nb_read_frames',
+        '-of',
+        'json',
+        upload.source,
+      ],
+      upload,
+    );
+    if (upload.cancelled) throw new Error('영상 내보내기를 취소했습니다.');
+    let input;
+    try {
+      input = JSON.parse(probe.stdout).streams?.[0];
+    } catch {}
+    if (
+      !probe.ok ||
+      probe.stderr.trim() ||
+      input?.codec_name !== 'h264' ||
+      Number(input.nb_read_frames) !== upload.totalFrames
+    )
+      throw new Error(
+        `영상 프레임이 누락되거나 손상되었습니다. ${upload.totalFrames}프레임이 필요하지만 ${input?.nb_read_frames || 0}프레임을 확인했습니다.`,
+      );
+    if (input.width !== 1920 || input.height !== 1080)
+      throw new Error('영상 프레임 크기가 1920 × 1080과 일치하지 않습니다.');
+    const mux = await exportTool(
+      'ffmpeg',
+      [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-y',
+        '-fflags',
+        '+genpts',
+        '-r',
+        String(upload.fps),
+        '-f',
+        'h264',
+        '-i',
+        upload.source,
+        ...(upload.hasAudio
+          ? [
+              '-i',
+              path.join(DATA, upload.sessionId + '.wav'),
+              '-map',
+              '0:v:0',
+              '-map',
+              '1:a:0',
+              '-af',
+              'apad',
+            ]
+          : ['-map', '0:v:0']),
+        '-c:v',
+        'copy',
+        '-t',
+        String(upload.totalFrames / upload.fps),
+        '-c:a',
+        'aac',
+        '-b:a',
+        '192k',
+        '-movflags',
+        '+faststart',
+        '-video_track_timescale',
+        '60000',
+        upload.mp4,
+      ],
+      upload,
+    );
+    if (upload.cancelled) throw new Error('영상 내보내기를 취소했습니다.');
+    if (!mux.ok)
+      throw new Error(
+        'MP4 영상 저장에 실패했습니다. ' +
+          (mux.stderr.trim() || mux.error?.message || 'FFmpeg 오류'),
+      );
+    const verify = await exportTool(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-count_frames',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=nb_read_frames,avg_frame_rate,r_frame_rate',
+        '-of',
+        'json',
+        upload.mp4,
+      ],
+      upload,
+    );
+    if (upload.cancelled) throw new Error('영상 내보내기를 취소했습니다.');
+    let output;
+    try {
+      output = JSON.parse(verify.stdout).streams?.[0];
+    } catch {}
+    if (
+      !verify.ok ||
+      verify.stderr.trim() ||
+      Number(output?.nb_read_frames) !== upload.totalFrames ||
+      output.avg_frame_rate !== `${upload.fps}/1`
+    )
+      throw new Error('완성된 MP4의 프레임 수나 60fps 간격이 원본과 일치하지 않습니다.');
+    await fs.unlink(upload.source);
+    if (upload.cancelled) throw new Error('영상 내보내기를 취소했습니다.');
+    return {
+      url: '/media/' + upload.stem + '.mp4',
+      format: 'mp4',
+      fps: upload.fps,
+      frames: upload.totalFrames,
+    };
+  }
   async function cancelExport(upload) {
     if (upload.cleanup) return upload.cleanup;
     upload.cancelled = true;
@@ -961,7 +1150,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       upload.process?.kill();
       await upload.writing?.catch(() => {});
       await upload.conversion?.catch(() => {});
-      await Promise.all([upload.webm, upload.mp4].map((file) => fs.unlink(file).catch(() => {})));
+      await Promise.all([upload.source, upload.mp4].map((file) => fs.unlink(file).catch(() => {})));
       exportUploads.delete(upload.id);
     })();
     return upload.cleanup;
@@ -1077,13 +1266,24 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
             body += chunk;
             if (body.length > 4096) throw new Error('잘못된 내보내기 요청입니다.');
           }
-          const { sessionId } = JSON.parse(body);
+          const { sessionId, format = 'webm', fps, totalFrames } = JSON.parse(body);
           if (typeof sessionId !== 'string' || sessionId === 'demo')
             throw new Error('저장된 연주를 선택하세요.');
+          if (!['webm', 'h264'].includes(format)) throw new Error('지원하지 않는 영상 형식입니다.');
           releaseSession = retainSession(sessionId);
           const session = await getSession(sessionId),
             id = randomUUID(),
             stem = `${sessionId}-${id}`;
+          if (format === 'h264') {
+            if (
+              fps !== 60 ||
+              !Number.isInteger(totalFrames) ||
+              totalFrames !== Math.ceil(session.duration * fps)
+            )
+              throw new Error('영상 프레임 수가 연주 길이의 60fps 타임라인과 일치하지 않습니다.');
+            await requireExportTools();
+            if (closing) throw new Error('앱을 종료 중입니다.');
+          }
           const upload = {
             id,
             stem,
@@ -1093,10 +1293,14 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
             bytes: 0,
             sequence: 0,
             updatedAt: Date.now(),
+            format,
+            fps,
+            totalFrames,
+            source: path.join(DATA, stem + '.' + format),
             webm: path.join(DATA, stem + '.webm'),
             mp4: path.join(DATA, stem + '.mp4'),
           };
-          const file = await fs.open(upload.webm, 'wx');
+          const file = await fs.open(upload.source, 'wx');
           await file.close();
           exportUploads.set(id, upload);
           return json({ uploadId: id, maxBytes: maxExportBytes });
@@ -1140,7 +1344,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
               req.destroy(new Error('영상 저장 크기 제한을 초과했습니다.'));
           });
           try {
-            upload.writing = pipeline(req, createWriteStream(upload.webm, { flags: 'a' }));
+            upload.writing = pipeline(req, createWriteStream(upload.source, { flags: 'a' }));
             await upload.writing;
             upload.bytes += chunkBytes;
             upload.sequence++;
@@ -1156,6 +1360,17 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         }
         if (!upload.bytes) throw new Error('저장된 영상 프레임이 없습니다.');
         upload.finishing = true;
+        if (upload.format === 'h264') {
+          upload.conversion = finishFrameExport(upload);
+          try {
+            const result = await upload.conversion;
+            exportUploads.delete(id);
+            return json(result);
+          } catch (error) {
+            await cancelExport(upload);
+            throw error;
+          }
+        }
         upload.conversion = new Promise((resolve) => {
           const proc = (upload.process = spawn(
             'ffmpeg',
@@ -1329,6 +1544,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       transport.position = transportDuration;
       transport.playing = false;
       transport.startedAt = now();
+      transport.reason = 'ended';
       publish();
     }
   }, 100);

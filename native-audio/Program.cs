@@ -13,6 +13,13 @@ internal static class Program
         lock (OutputLock) Console.WriteLine(JsonSerializer.Serialize(value));
     }
 
+    internal static uint ParseSampleRate(string? value)
+    {
+        if (value is null) return 44100;
+        if (uint.TryParse(value, out var rate) && rate is 44100 or 48000) return rate;
+        throw new ArgumentException("Sample rate must be 44100 or 48000 Hz and match Kontakt's Audio settings.");
+    }
+
     [MTAThread]
     private static int Main(string[] args)
     {
@@ -36,7 +43,8 @@ internal static class Program
                 return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
             }
             if (!int.TryParse(Value("--pid"), out var pid) || pid <= 0 || Value("--output") is not string output)
-                throw new ArgumentException("Usage: ProcessAudio --pid <process id> --output <new .wav path> [--seconds <duration>] | --probe | --self-test");
+                throw new ArgumentException("Usage: ProcessAudio --pid <process id> --output <new .wav path> [--sample-rate 44100|48000] [--seconds <duration>] | --probe | --self-test");
+            uint sampleRate = ParseSampleRate(Value("--sample-rate"));
             using var process = Process.GetProcessById(pid);
             var path = Path.GetFullPath(output);
             if (!Path.GetExtension(path).Equals(".wav", StringComparison.OrdinalIgnoreCase))
@@ -47,7 +55,7 @@ internal static class Program
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             using var stop = new ManualResetEvent(false);
             Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Set(); };
-            using var capture = new ProcessLoopback((uint)pid, path);
+            using var capture = new ProcessLoopback((uint)pid, path, sampleRate);
             // Leave stdin open while capturing. Parent exit / pipe closure also finishes the WAV.
             _ = Task.Run(() =>
             {
@@ -74,7 +82,7 @@ internal static class Program
 
 internal sealed class ProcessLoopback : IDisposable
 {
-    private const uint SampleRate = 48000;
+    private readonly uint SampleRate;
     private readonly AutoResetEvent sampleEvent = new(false);
     private readonly WaveWriter writer;
     private IAudioClient? audioClient;
@@ -93,8 +101,10 @@ internal sealed class ProcessLoopback : IDisposable
     private readonly List<object> packetDiagnostics = new();
     private byte[] buffer = new byte[48000];
 
-    internal ProcessLoopback(uint pid, string path)
+    internal ProcessLoopback(uint pid, string path, uint sampleRate)
     {
+        if (sampleRate is not (44100 or 48000)) throw new ArgumentOutOfRangeException(nameof(sampleRate));
+        SampleRate = sampleRate;
         this.pid = pid;
         this.path = path;
         // CreateNew prevents a mistaken file selection from destroying an earlier take.
@@ -104,7 +114,8 @@ internal sealed class ProcessLoopback : IDisposable
             audioClient = Activate(pid);
             var format = new WaveFormat { FormatTag = 1, Channels = 2, SamplesPerSecond = SampleRate,
                 AverageBytesPerSecond = SampleRate * 4, BlockAlign = 4, BitsPerSample = 16, ExtraSize = 0 };
-            // Shared process loopback converts the process stream to a predictable edit-friendly format.
+            // Match Kontakt's output rate. Resampling 309-frame / 44.1 kHz engine packets
+            // to integer 336-frame / 48 kHz packets caused periodic clicks on process loopback.
             Check(audioClient.Initialize(0, 0x80000000u | 0x08000000u | 0x00020000u | 0x00040000u,
                 0, 0, ref format, IntPtr.Zero), "Initialize process loopback");
             var captureId = typeof(IAudioCaptureClient).GUID;
@@ -321,11 +332,22 @@ internal static class SelfTest
                 BitConverter.ToUInt32(bytes, 24) != 48000 || bytes[44 + 2400 * 4] != 255 || bytes[44 + 2400 * 4 + 3] != 128)
                 throw new Exception("WAV header, duration, or PCM sample test failed.");
             TestPacketTimeline();
+            if (Program.ParseSampleRate(null) != 44100 || Program.ParseSampleRate("44100") != 44100 ||
+                Program.ParseSampleRate("48000") != 48000)
+                throw new Exception("Capture sample-rate defaults or supported rates failed.");
+            try { Program.ParseSampleRate("96000"); throw new Exception("Unsupported capture rate was accepted."); }
+            catch (ArgumentException) { }
+            using (var rateWriter = new WaveWriter(path + ".44100", 44100, 2, 16))
+                rateWriter.PadToFrame(4410);
+            var rateBytes = File.ReadAllBytes(path + ".44100");
+            if (BitConverter.ToUInt32(rateBytes, 24) != 44100 || BitConverter.ToUInt32(rateBytes, 28) != 176400 ||
+                BitConverter.ToUInt32(rateBytes, 40) != 17640)
+                throw new Exception("44.1 kHz WAV header or duration failed.");
             Program.Emit(new { type = "self-test", passed = true, frames = 4800, bytes = bytes.Length,
-                tests = new[] { "wave-header", "pcm-samples", "qpc-clock-drift", "device-frame-gap", "timestamp-recovery", "device-clock-reset", "initial-frame-anchor", "unavailable-device-counter", "bounded-clock-map" } });
+                tests = new[] { "wave-header", "pcm-samples", "qpc-clock-drift", "device-frame-gap", "timestamp-recovery", "device-clock-reset", "initial-frame-anchor", "unavailable-device-counter", "bounded-clock-map", "capture-sample-rates" } });
             return 0;
         }
-        finally { File.Delete(path); }
+        finally { File.Delete(path); File.Delete(path + ".44100"); }
     }
 
     private static void TestPacketTimeline()
@@ -386,6 +408,14 @@ internal static class SelfTest
         var bounded = longTake.GetClockAnchors();
         if (bounded.Length > 4096 || bounded[0].frame != 0 || bounded[^1].frame != 19999 * 48000L)
             throw new Exception("Clock-map bounds lost the beginning or end of a long take.");
+        var matchedRate = new PacketTimeline(44100, startQpc / 10_000_000d);
+        for (uint packet = 0; packet < 3000; packet++)
+        {
+            long offset = matchedRate.GetOffset(309, 0, 0, startQpc + (ulong)Math.Round(packet * 309d / 44100 * 10_000_000), packet * 309L);
+            if (offset != packet * 309L) throw new Exception("Matched 44.1 kHz packets lost PCM continuity.");
+        }
+        if (matchedRate.MaxQpcDriftFrames != 0 || matchedRate.InsertedGapFrames != 0)
+            throw new Exception("Matching 309-frame engine packets must not accumulate clock drift.");
     }
 }
 

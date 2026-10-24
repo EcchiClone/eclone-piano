@@ -75,8 +75,11 @@ try {
       ],
     }),
   );
-  const port = Number(process.env.LUMA_EXPORT_TEST_PORT || 3219);
-  server = await startServer({ port, dataDir: recordingRoot });
+  server = await startServer({
+    port: Number(process.env.LUMA_EXPORT_TEST_PORT || 0),
+    dataDir: recordingRoot,
+  });
+  const { port } = server;
   const base = `http://127.0.0.1:${port}`;
   const post = async (route, body, headers = {}) =>
     fetch(base + route, { method: 'POST', body, headers });
@@ -114,6 +117,65 @@ try {
   for (const upload of uploads) assert.ok((await post('/api/export/cancel/' + upload.uploadId)).ok);
   await assert.rejects(fs.stat(`${prefix}-${probeUpload}.webm`), { code: 'ENOENT' });
   report.uploadProtocol = 'concurrency, sequence and cancellation passed';
+  const h264Body = {
+    sessionId: id,
+    format: 'h264',
+    fps: 60,
+    totalFrames: Math.ceil(duration * 60),
+  };
+  assert.equal(
+    (
+      await post('/api/export/start', JSON.stringify({ ...h264Body, totalFrames: 1 }), {
+        'Content-Type': 'application/json',
+      })
+    ).status,
+    400,
+    'The server must independently enforce every expected frame.',
+  );
+  const incompleteSource = path.join(recordingRoot, id + '-incomplete.h264');
+  await exec('ffmpeg', [
+    '-v',
+    'error',
+    '-y',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=black:s=1920x1080:r=60',
+    '-frames:v',
+    String(h264Body.totalFrames - 1),
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-tune',
+    'zerolatency',
+    '-pix_fmt',
+    'yuv420p',
+    '-f',
+    'h264',
+    incompleteSource,
+  ]);
+  const incompleteStart = await post('/api/export/start', JSON.stringify(h264Body), {
+    'Content-Type': 'application/json',
+  });
+  assert.equal(incompleteStart.status, 200);
+  const incompleteUpload = (await incompleteStart.json()).uploadId;
+  assert.equal(
+    (
+      await post('/api/export/chunk/' + incompleteUpload, await fs.readFile(incompleteSource), {
+        'X-Export-Sequence': '0',
+      })
+    ).status,
+    200,
+  );
+  const incompleteFinish = await post('/api/export/finish/' + incompleteUpload);
+  assert.equal(incompleteFinish.status, 400, 'An export missing even one encoded frame must fail.');
+  assert.match((await incompleteFinish.json()).error, /144.*143/);
+  await assert.rejects(fs.stat(`${prefix}-${incompleteUpload}.h264`), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(`${prefix}-${incompleteUpload}.mp4`), { code: 'ENOENT' });
+  await fs.unlink(incompleteSource);
+  report.h264Validation =
+    'Incorrect declared count and 143/144 decoded frames rejected; partial files cleaned';
   browser = await chromium.launch({
     executablePath:
       process.env.LUMA_TEST_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -127,10 +189,17 @@ try {
   });
   page.on('pageerror', (error) => report.errors.push(error.message));
   await page.addInitScript(() => {
-    const capture = HTMLCanvasElement.prototype.captureStream;
-    HTMLCanvasElement.prototype.captureStream = function (...args) {
-      window.exportCaptureDimensions = { width: this.width, height: this.height, fps: args[0] };
-      return capture.apply(this, args);
+    const NativeVideoFrame = window.VideoFrame;
+    window.exportFrameStats = [];
+    window.VideoFrame = class extends NativeVideoFrame {
+      constructor(...args) {
+        super(...args);
+        window.exportFrameStats.push({
+          width: this.codedWidth,
+          height: this.codedHeight,
+          timestamp: this.timestamp,
+        });
+      }
     };
   });
   await page.goto(base);
@@ -139,7 +208,18 @@ try {
   await page.waitForFunction(() => !document.getElementById('exportDownload').hidden, null, {
     timeout: 90000,
   });
-  report.capture = await page.evaluate(() => window.exportCaptureDimensions);
+  const generatedFrames = await page.evaluate(() => window.exportFrameStats);
+  report.capture = { ...generatedFrames[0], frames: generatedFrames.length };
+  assert.equal(
+    generatedFrames.length,
+    h264Body.totalFrames,
+    'Offline export must render every scheduled frame.',
+  );
+  for (let index = 0; index < generatedFrames.length; index++) {
+    assert.equal(generatedFrames[index].width, 1920);
+    assert.equal(generatedFrames[index].height, 1080);
+    assert.equal(generatedFrames[index].timestamp, Math.round((index * 1_000_000) / 60));
+  }
   report.resultUrl = await page.locator('#exportDownload').getAttribute('href');
   report.exportStatus = await page.locator('#exportStatus').innerText();
   assert.ok(report.resultUrl.endsWith('.mp4'), 'Expected local FFmpeg to create MP4.');
@@ -167,6 +247,51 @@ try {
   };
   assert.ok(video && audio, 'MP4 must contain video and original audio.');
   assert.equal(video.avg_frame_rate, '60/1', 'MP4 must use a stable 60 fps editing timeline.');
+  const { stdout: timestamps } = await exec('ffprobe', [
+    '-v',
+    'error',
+    '-select_streams',
+    'v:0',
+    '-show_entries',
+    'frame=best_effort_timestamp_time',
+    '-of',
+    'csv=p=0',
+    outputPath,
+  ]);
+  const pts = timestamps
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => Number.parseFloat(line))
+    .filter(Number.isFinite);
+  assert.equal(
+    pts.length,
+    h264Body.totalFrames,
+    'Actual decoded frames must match the planned frame count.',
+  );
+  for (let index = 0; index < pts.length; index++)
+    assert.ok(Math.abs(pts[index] - index / 60) < 0.00001);
+  const { stdout: frameHashes } = await exec(
+    'ffmpeg',
+    ['-v', 'error', '-ss', '0.5', '-i', outputPath, '-t', '1', '-an', '-f', 'framemd5', 'pipe:1'],
+    { maxBuffer: 1024 * 1024 },
+  );
+  const hashes = frameHashes
+    .split(/\r?\n/)
+    .filter((line) => line && !line.startsWith('#'))
+    .map((line) => line.split(',').at(-1).trim());
+  const duplicates = hashes.slice(1).filter((hash, index) => hash === hashes[index]).length;
+  report.cadence = {
+    decodedFrames: pts.length,
+    actualFps: (pts.length - 1) / (pts.at(-1) - pts[0]),
+    animatedFrames: hashes.length,
+    consecutiveDuplicates: duplicates,
+  };
+  assert.ok(hashes.length >= 59);
+  assert.equal(
+    duplicates,
+    0,
+    'A moving sustained note must advance in every frame, rather than cloning low-FPS captures.',
+  );
   assert.ok(
     Math.abs(Number(video.duration) - duration) < 0.05,
     'Video track must cover the whole performance.',
@@ -207,11 +332,6 @@ try {
   report.remainingOffscreenCanvases = await page.locator('body > canvas').count();
   assert.equal(report.remainingOffscreenCanvases, 0, 'Export must release its offscreen canvas.');
   assert.deepEqual(report.errors, []);
-  assert.deepEqual(
-    report.capture,
-    { width: 1920, height: 1080, fps: 60 },
-    'Windows display scaling must not change export dimensions.',
-  );
   assert.equal(video.width, 1920);
   assert.equal(video.height, 1080);
 
@@ -231,7 +351,7 @@ try {
       !document.getElementById('exportDialog').open &&
       document.querySelectorAll('body > canvas').length === 0,
   );
-  await assert.rejects(fs.stat(`${prefix}-${cancelUpload}.webm`), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(`${prefix}-${cancelUpload}.h264`), { code: 'ENOENT' });
   await assert.rejects(fs.stat(`${prefix}-${cancelUpload}.mp4`), { code: 'ENOENT' });
   assert.ok(
     (await fs.stat(outputPath)).size > 0,

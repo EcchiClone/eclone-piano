@@ -16,6 +16,13 @@ let socket,
   lastMidiAt = 0,
   audio = null,
   audioSession = null,
+  audioTransport = null,
+  audioWantedPlaying = false,
+  audioStartPosition = 0,
+  audioPendingSeek = null,
+  audioPlayPending = null,
+  audioPlayBlocked = false,
+  audioRevision = 0,
   exportAbort = null,
   exporting = false,
   renderFrames = 0,
@@ -31,6 +38,13 @@ const escape = (value) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
   );
 const send = (msg) => {
+  if (msg.type === 'seek' && usesAudioClock() && playbackPlaying() && !state.transport.playing)
+    msg = { type: 'play', sessionId: audioSession, position: msg.position };
+  if (msg.type === 'pause' && usesAudioClock()) {
+    msg = { ...msg, position: Number.isFinite(msg.position) ? msg.position : position() };
+    audioWantedPlaying = false;
+    audio.pause();
+  }
   if (socket?.readyState === 1) socket.send(JSON.stringify(msg));
   else toast('서버 연결을 기다려 주세요.', 'error');
 };
@@ -41,7 +55,7 @@ function toast(message, kind = 'info') {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => ($('toast').className = ''), 6500);
 }
-function position() {
+function transportPosition() {
   if (!state || state.transport.mode === 'live') return serverNow();
   const tr = state.transport;
   return Math.min(
@@ -49,6 +63,29 @@ function position() {
     tr.position + (tr.playing ? serverNow() - tr.startedAt : 0),
   );
 }
+function usesAudioClock() {
+  return !!(
+    audio &&
+    audioSession === state?.transport.sessionId &&
+    currentSession?.hasAudio &&
+    state.transport.mode !== 'live'
+  );
+}
+function position() {
+  if (!usesAudioClock()) return transportPosition();
+  return Math.max(
+    0,
+    Math.min(currentSession.duration, audio.readyState ? audio.currentTime : audioStartPosition),
+  );
+}
+function playbackPlaying() {
+  return usesAudioClock()
+    ? audioWantedPlaying && !audioPlayBlocked && !audio.ended
+    : !!state?.transport.playing;
+}
+const transportKeys = ['mode', 'sessionId', 'position', 'playing', 'startedAt', 'reason'];
+const changedTransport = (previous, next) =>
+  transportKeys.some((key) => previous?.[key] !== next?.[key]);
 function visualState() {
   const mode = state?.transport.mode || 'live',
     settings = state?.settings || {};
@@ -79,6 +116,7 @@ async function getSession(id) {
   return data;
 }
 function stopAudio() {
+  audioRevision++;
   if (audio) {
     audio.pause();
     audio.removeAttribute('src');
@@ -86,16 +124,24 @@ function stopAudio() {
     audio = null;
   }
   audioSession = null;
+  audioTransport = null;
+  audioWantedPlaying = false;
+  audioStartPosition = 0;
+  audioPendingSeek = null;
+  audioPlayPending = null;
+  audioPlayBlocked = false;
 }
-async function syncSession() {
+async function syncSession(initialPosition) {
   const request = ++sessionLoad,
-    id = state?.transport.sessionId;
+    id = state?.transport.sessionId,
+    requestedTransport = state?.transport;
   if (!id) {
     currentSession = null;
     replay.reset();
     stopAudio();
     return;
   }
+  if (audioSession && audioSession !== id) stopAudio();
   try {
     const session = await getSession(id);
     if (request !== sessionLoad) return;
@@ -107,31 +153,88 @@ async function syncSession() {
         audio = new Audio('/media/' + id + '.wav');
         audio.preload = 'auto';
         audioSession = id;
+        const element = audio;
+        audio.addEventListener('loadedmetadata', () => {
+          if (audio !== element) return;
+          if (audioPendingSeek !== null) seekAudio(audioPendingSeek);
+          playAudioIfWanted();
+        });
+        audio.addEventListener('ended', () => {
+          if (audio !== element) return;
+          audioWantedPlaying = false;
+          updateUI();
+        });
         audio.addEventListener('error', () =>
           toast('원음 파일을 재생할 수 없습니다. 저장 폴더에서 WAV 파일을 확인하세요.', 'error'),
         );
       }
-      syncAudio(true);
+      syncAudio(
+        true,
+        !changedTransport(requestedTransport, state.transport) ? initialPosition : undefined,
+      );
     } else stopAudio();
     updateUI();
   } catch (error) {
     toast(error.message, 'error');
   }
 }
-function syncAudio(force = false) {
-  if (!audio || !state || exporting) return;
-  const target = position();
-  if (force || Math.abs(audio.currentTime - target) > 0.18) {
-    try {
-      audio.currentTime = target;
-    } catch {}
+function seekAudio(target) {
+  audioStartPosition = Math.max(0, Math.min(currentSession.duration, target));
+  try {
+    audio.currentTime = audioStartPosition;
+    audioPendingSeek = null;
+  } catch {
+    audioPendingSeek = audioStartPosition;
   }
-  const shouldPlay = state.transport.playing && target < (currentSession?.duration || 0);
-  if (shouldPlay && audio.paused)
-    audio.play().catch(() => {
+}
+function playAudioIfWanted() {
+  if (
+    !audio ||
+    !audioWantedPlaying ||
+    !audio.paused ||
+    audio.ended ||
+    audioPlayPending ||
+    audioPlayBlocked
+  )
+    return;
+  const element = audio,
+    revision = audioRevision;
+  const pending = Promise.resolve(element.play())
+    .catch(() => {
+      if (audio !== element || revision !== audioRevision || !audioWantedPlaying) return;
+      audioPlayBlocked = true;
       if (!viewer) toast('원음 재생을 시작하려면 재생 버튼을 한 번 눌러 주세요.');
+      updateUI();
+    })
+    .finally(() => {
+      if (audio === element && audioPlayPending === pending) {
+        audioPlayPending = null;
+        playAudioIfWanted();
+      }
     });
-  if (!shouldPlay && !audio.paused) audio.pause();
+  audioPlayPending = pending;
+}
+function syncAudio(force = false, initialPosition) {
+  if (!audio || !state || exporting || !usesAudioClock()) return;
+  const tr = state.transport;
+  if (force || changedTransport(audioTransport, tr)) {
+    audioRevision++;
+    const previous = audioTransport;
+    const naturalEnd = tr.reason === 'ended' && previous?.playing && !tr.playing;
+    audioTransport = { ...tr };
+    if (!naturalEnd) {
+      audioWantedPlaying = !!tr.playing;
+      audioPlayBlocked = false;
+      // Pause at the sample currently being heard. A later explicit seek or
+      // resume carries its own requested position and may intentionally move it.
+      const justPaused = previous?.playing && !tr.playing;
+      if (!justPaused) seekAudio(Number.isFinite(initialPosition) ? initialPosition : tr.position);
+      if (!audioWantedPlaying) audio.pause();
+    }
+    // Natural server completion must not discard a media tail that began after
+    // buffering. The local visual clock follows that tail until audio 'ended'.
+  }
+  playAudioIfWanted();
 }
 function connectSocket() {
   socket = new WebSocket(`ws://${location.host}/?${viewer ? 'viewer=1' : ''}`);
@@ -152,9 +255,7 @@ function connectSocket() {
     if (msg.type === 'hello' || msg.type === 'state') {
       const oldTransport = state?.transport;
       const oldId = oldTransport?.sessionId;
-      const transportChanged = ['mode', 'sessionId', 'position', 'playing', 'startedAt'].some(
-        (key) => oldTransport?.[key] !== msg.transport[key],
-      );
+      const transportChanged = changedTransport(oldTransport, msg.transport);
       state = msg;
       offset = msg.serverTime - performance.now() / 1000;
       count = msg.midiCount;
@@ -162,7 +263,8 @@ function connectSocket() {
         live.reset();
         for (const e of msg.history || []) live.ingest(e);
       }
-      if (oldId !== msg.transport.sessionId || msg.type === 'hello') syncSession();
+      if (oldId !== msg.transport.sessionId || msg.type === 'hello')
+        syncSession(msg.type === 'hello' ? transportPosition() : msg.transport.position);
       else syncAudio(transportChanged);
       updateUI();
     } else if (msg.type === 'midi') {
@@ -252,7 +354,7 @@ function updateUI() {
   $('seek').disabled = liveMode;
   $('seek').max = currentSession?.duration || 1;
   $('duration').textContent = liveMode ? 'LIVE' : timeText(currentSession?.duration);
-  $('playButton').textContent = tr.playing ? 'Ⅱ' : '▶';
+  $('playButton').textContent = playbackPlaying() ? 'Ⅱ' : '▶';
   $('playButton').title = liveMode ? '데모 재생' : '재생 / 일시정지';
   $('stageDirection').textContent =
     (liveMode || s.direction === 'up' ? 'RISING' : 'FALLING') +
@@ -270,6 +372,7 @@ function updateUI() {
     ? '실시간 연주는 건반에서 위로 뻗어 나갑니다.'
     : '내려오는 노트를 미리 보며 저장된 연주를 감상하세요.';
   $('secondsVisible').value = s.secondsVisible;
+  $('audioSampleRate').value = String(s.audioSampleRate ?? 44100);
   $('secondsValue').textContent = Number(s.secondsVisible).toFixed(1) + '초';
   $('glow').value = s.glow;
   $('glowValue').textContent = Math.round(s.glow * 100) + '%';
@@ -323,6 +426,7 @@ function updateUI() {
   $('recordButton').disabled = !!(state.starting || state.stopping);
   for (const id of ['takeName', 'audioProcess', 'withAudio']) $(id).disabled = busy;
   $('audioProcess').disabled = busy || !$('withAudio').checked;
+  $('audioSampleRate').disabled = busy || !$('withAudio').checked;
   $('demoButton').disabled = busy;
   $('playButton').disabled = busy;
   if (!busy) {
@@ -383,28 +487,13 @@ async function exportVideo(id) {
   }
   exporting = true;
   let cancelled = false,
-    failure = null,
-    recorder = null,
-    exportAudio = null,
-    audioContext = null,
-    raf = 0,
-    stream = null,
-    exportRenderer = null,
-    canvas = null,
-    uploadId = null;
-  let uploadChain = Promise.resolve(),
-    queuedBytes = 0,
-    sequence = 0,
-    acceptChunks = true;
+    exportRenderer,
+    canvas,
+    uploadId,
+    sequence = 0;
   const abort = new AbortController();
-  const fail = (error) => {
-    failure ??= error;
-    abort.abort();
-    if (recorder?.state === 'recording') recorder.stop();
-  };
   const check = () => {
-    if (failure) throw failure;
-    if (cancelled) throw new Error('EXPORT_CANCELLED');
+    if (cancelled || abort.signal.aborted) throw new Error('EXPORT_CANCELLED');
   };
   const request = async (url, body, headers = {}) => {
     check();
@@ -416,7 +505,7 @@ async function exportVideo(id) {
   $('exportDialog').showModal();
   $('exportTitle').textContent = '영상으로 담는 중';
   $('exportDescription').textContent =
-    '현재 디자인으로 1920 × 1080 영상을 생성합니다. 연주 길이만큼 시간이 걸리며, 영상은 디스크에 나누어 저장합니다.';
+    '1920 × 1080 · 60fps로 모든 프레임을 차례로 만듭니다. 컴퓨터 성능에 따라 연주 길이보다 오래 걸릴 수 있습니다.';
   $('exportProgress').value = 0;
   $('exportStatus').textContent = '준비 중…';
   $('exportDownload').hidden = true;
@@ -425,12 +514,12 @@ async function exportVideo(id) {
   exportAbort = () => {
     cancelled = true;
     abort.abort();
-    if (recorder?.state === 'recording') recorder.stop();
   };
   try {
     const take = await getSession(id);
     check();
     const model = Performance.fromJSON(take),
+      fps = 60,
       options = {
         ...state.settings,
         background: 'dark',
@@ -439,164 +528,73 @@ async function exportVideo(id) {
         pixelRatio: 1,
         time: 0,
       };
+    const playbackPosition = position();
     if (audio) audio.pause();
-    send({ type: 'pause' });
+    send({ type: 'pause', position: playbackPosition });
+    renderer.stop();
+    ({ uploadId } = await request(
+      '/api/export/start',
+      JSON.stringify({
+        sessionId: id,
+        format: 'h264',
+        fps,
+        totalFrames: Math.ceil(take.duration * fps),
+      }),
+      { 'Content-Type': 'application/json' },
+    ));
     canvas = document.createElement('canvas');
     canvas.width = 1920;
     canvas.height = 1080;
     canvas.style.cssText = 'position:fixed;left:-20000px;width:1920px;height:1080px';
     document.body.appendChild(canvas);
     exportRenderer = new PianoRenderer(canvas, () => options);
-    exportRenderer.renderAt(0);
-    stream = canvas.captureStream(60);
-    if (take.hasAudio) {
-      audioContext = new AudioContext();
-      await audioContext.resume();
-      check();
-      exportAudio = new Audio('/media/' + id + '.wav');
-      exportAudio.preload = 'auto';
-      await new Promise((resolve, reject) => {
-        const done = (error) => {
-          clearTimeout(timer);
-          abort.signal.removeEventListener('abort', onAbort);
-          exportAudio.removeEventListener('canplay', ready);
-          exportAudio.removeEventListener('error', broken);
-          error ? reject(error) : resolve();
-        };
-        const ready = () => done(),
-          broken = () => done(new Error('원음 WAV를 읽지 못했습니다.')),
-          onAbort = () => done(failure || new Error('EXPORT_CANCELLED'));
-        const timer = setTimeout(() => done(new Error('원음 WAV 로딩 시간 초과')), 15000);
-        exportAudio.addEventListener('canplay', ready, { once: true });
-        exportAudio.addEventListener('error', broken, { once: true });
-        abort.signal.addEventListener('abort', onAbort, { once: true });
-        exportAudio.load();
-      });
-      const source = audioContext.createMediaElementSource(exportAudio),
-        destination = audioContext.createMediaStreamDestination();
-      source.connect(destination);
-      for (const track of destination.stream.getAudioTracks()) stream.addTrack(track);
-    }
-    check();
-    const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(
-      (m) => MediaRecorder.isTypeSupported(m),
-    );
-    if (!mime)
-      throw new Error('이 브라우저에서 영상 녹화를 지원하지 않습니다. 데스크톱 앱을 사용하세요.');
-    ({ uploadId } = await request('/api/export/start', JSON.stringify({ sessionId: id }), {
-      'Content-Type': 'application/json',
-    }));
-    recorder = new MediaRecorder(stream, {
-      mimeType: mime,
-      videoBitsPerSecond: 14_000_000,
-      audioBitsPerSecond: 192_000,
-    });
-    recorder.ondataavailable = (e) => {
-      if (!e.data.size || cancelled || failure || !acceptChunks) return;
-      queuedBytes += e.data.size;
-      if (queuedBytes > 64 * 1024 * 1024) {
-        fail(
-          new Error(
-            '디스크 저장이 영상 생성 속도를 따라가지 못했습니다. 여유 공간을 확인하고 다시 시도하세요.',
-          ),
-        );
-        return;
-      }
-      const chunk = e.data,
-        index = sequence++;
-      uploadChain = uploadChain
-        .then(async () => {
-          if (cancelled || failure) return;
-          await request('/api/export/chunk/' + uploadId, chunk, {
-            'X-Export-Sequence': String(index),
-          });
-        })
-        .catch((error) => {
-          if (!cancelled) fail(error);
-        })
-        .finally(() => {
-          queuedBytes -= chunk.size;
-        });
-    };
-    const finished = new Promise((resolve) => {
-      recorder.onstop = resolve;
-      recorder.onerror = (e) => {
-        fail(e.error || new Error('영상 인코딩 오류'));
-        resolve();
-      };
-    });
-    exportRenderer.renderAt(0);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    check();
-    recorder.start(1000);
-    if (exportAudio) await exportAudio.play();
-    check();
-    const started = performance.now();
-    await new Promise((resolve, reject) => {
-      const onAbort = () => reject(failure || new Error('EXPORT_CANCELLED'));
-      abort.signal.addEventListener('abort', onAbort, { once: true });
-      const frame = () => {
-        const t =
-          exportAudio && !exportAudio.ended
-            ? exportAudio.currentTime
-            : (performance.now() - started) / 1000;
-        options.time = t;
-        exportRenderer.renderAt(t);
-        $('exportProgress').value = Math.min(1, t / take.duration);
+    const { encodeCanvasFrames } = await import('./offline-video.js');
+    window.lumaExportDiagnostics = await encodeCanvasFrames({
+      canvas,
+      duration: take.duration,
+      signal: abort.signal,
+      render: (time) => {
+        options.time = time;
+        exportRenderer.renderAt(time);
+      },
+      onChunk: (chunk) =>
+        request('/api/export/chunk/' + uploadId, chunk, {
+          'X-Export-Sequence': String(sequence++),
+        }),
+      onProgress: (report) => {
+        window.lumaExportDiagnostics = report;
+        $('exportProgress').value = report.renderedFrames / report.totalFrames;
         $('exportStatus').textContent =
-          `${timeText(t)} / ${timeText(take.duration)} · 1080p · 디스크에 저장 중`;
-        if (t >= take.duration) {
-          abort.signal.removeEventListener('abort', onAbort);
-          resolve();
-          return;
-        }
-        raf = requestAnimationFrame(frame);
-      };
-      frame();
+          `${report.renderedFrames.toLocaleString()} / ${report.totalFrames.toLocaleString()} 프레임 · 1080p · 60fps`;
+      },
     });
-    if (recorder.state === 'recording') recorder.stop();
-    await finished;
-    await uploadChain;
     check();
-    $('exportStatus').textContent = 'MP4로 변환하고 저장하는 중…';
+    $('exportStatus').textContent = '원음을 합치고 프레임 수를 검증하는 중…';
     const result = await request('/api/export/finish/' + uploadId);
     uploadId = null;
     $('exportTitle').textContent = '영상이 준비됐어요.';
-    $('exportDescription').textContent =
-      result.format === 'mp4'
-        ? '원음과 시각화를 담은 MP4 영상을 저장했습니다.'
-        : 'FFmpeg 변환을 사용할 수 없어 WebM 원본으로 저장했습니다.';
-    $('exportStatus').textContent = '1920 × 1080 · ' + result.format.toUpperCase();
+    $('exportDescription').textContent = '모든 프레임과 원음을 담은 60fps MP4 영상을 저장했습니다.';
+    $('exportStatus').textContent = '1920 × 1080 · 60fps · MP4';
     $('exportProgress').value = 1;
     $('exportDownload').href = result.url;
     $('exportDownload').download =
-      `${take.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 100)}-${options.theme}.${result.format}`;
+      `${take.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 100)}-${options.theme}.mp4`;
     $('exportDownload').hidden = false;
     $('cancelExport').textContent = '닫기';
-    $('cancelExport').hidden = false;
   } catch (error) {
-    if (!cancelled) toast(failure?.message || error.message, 'error');
+    if (!cancelled) toast(error.message, 'error');
     $('exportDialog').close();
   } finally {
-    acceptChunks = false;
-    cancelAnimationFrame(raf);
-    if (recorder?.state === 'recording') recorder.stop();
-    exportAudio?.pause();
-    stream?.getTracks().forEach((t) => t.stop());
     abort.abort();
-    await uploadChain;
     if (uploadId) await fetch('/api/export/cancel/' + uploadId, { method: 'POST' }).catch(() => {});
-    if (exportAudio) {
-      exportAudio.removeAttribute('src');
-      exportAudio.load();
-    }
-    await audioContext?.close().catch(() => {});
     exportRenderer?.destroy();
     canvas?.remove();
+    renderer.start();
     exporting = false;
     exportAbort = null;
   }
 }
+
 if (!viewer) {
   $('helpButton').onclick = () => $('helpDialog').showModal();
   $('obsButton').onclick = () => $('obsDialog').showModal();
@@ -619,14 +617,17 @@ if (!viewer) {
   $('demoButton').onclick = $('emptyDemo').onclick = () =>
     send({ type: 'play', sessionId: 'demo', position: 0 });
   $('playButton').onclick = () => {
-    if (audio) audio.play().catch(() => {});
-    if (state?.transport.playing) send({ type: 'pause' });
+    if (playbackPlaying()) send({ type: 'pause', position: position() });
     else
       send({
         type: 'play',
         sessionId: state?.transport.sessionId || 'demo',
         position:
-          position() >= (currentSession?.duration || Infinity) ? 0 : state?.transport.position || 0,
+          position() >= (currentSession?.duration || Infinity)
+            ? 0
+            : state?.transport.mode === 'live'
+              ? 0
+              : position(),
       });
   };
   $('returnLive').onclick = $('liveTab').onclick = () => send({ type: 'live' });
@@ -675,6 +676,8 @@ if (!viewer) {
   };
   $('refreshAudio').onclick = loadAudio;
   $('withAudio').onchange = () => updateUI();
+  $('audioSampleRate').onchange = () =>
+    setSettings({ audioSampleRate: Number($('audioSampleRate').value) });
   $('recordButton').onclick = () => {
     if (state?.recording) {
       send({ type: 'stopRecord' });
@@ -685,7 +688,13 @@ if (!viewer) {
       toast('Kontakt를 실행한 뒤 오디오 소스 새로고침을 눌러 주세요.', 'error');
       return;
     }
-    send({ type: 'record', name: $('takeName').value, withAudio: $('withAudio').checked, pid });
+    send({
+      type: 'record',
+      name: $('takeName').value,
+      withAudio: $('withAudio').checked,
+      pid,
+      sampleRate: Number($('audioSampleRate').value),
+    });
   };
   $('sessionList').onclick = (e) => {
     const play = e.target.closest('[data-play]'),

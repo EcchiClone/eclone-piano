@@ -16,3 +16,4 @@ try {
   await fs.rm(dataDir, { recursive: true, force: true });
 }
 await import('./playback-settings.mjs');
+await import('./playback-clock.mjs');

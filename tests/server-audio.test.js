@@ -22,16 +22,16 @@ let recorder;
 let midiBridge;
 let recorderCount = 0;
 
-function waveFile(file, finalized = true) {
-  const data = Buffer.alloc(44 + 4800 * 4);
+function waveFile(file, finalized = true, sampleRate = 48000) {
+  const data = Buffer.alloc(44 + (sampleRate / 10) * 4);
   data.write('RIFF', 0);
   data.writeUInt32LE(finalized ? data.length - 8 : 36, 4);
   data.write('WAVEfmt ', 8);
   data.writeUInt32LE(16, 16);
   data.writeUInt16LE(1, 20);
   data.writeUInt16LE(2, 22);
-  data.writeUInt32LE(48000, 24);
-  data.writeUInt32LE(192000, 28);
+  data.writeUInt32LE(sampleRate, 24);
+  data.writeUInt32LE(sampleRate * 4, 28);
   data.writeUInt16LE(4, 32);
   data.writeUInt16LE(16, 34);
   data.write('data', 36);
@@ -97,18 +97,23 @@ childProcess.spawn = (command, args) => {
   const current = { ...behavior };
   recorderCount++;
   const output = args[args.indexOf('--output') + 1];
+  const sampleRate = Number(args[args.indexOf('--sample-rate') + 1]);
+  assert.ok(
+    [44100, 48000].includes(sampleRate),
+    'Native helper receives a supported explicit rate',
+  );
   recordings.add(output.slice(0, -4));
   const child = fakeChild(() => {
     if (child.exitCode !== null) return;
     setTimeout(() => {
       if (child.exitCode !== null) return;
       if (current.finalize !== false) {
-        waveFile(output, true);
+        waveFile(output, true, sampleRate);
         child.message({
           type: 'stopped',
           path: output,
           durationMs: 100,
-          frames: 4800,
+          frames: sampleRate / 10,
           peak: 0.3,
           silent: false,
           discontinuities: 0,
@@ -126,15 +131,17 @@ childProcess.spawn = (command, args) => {
     }, current.stopDelay ?? 5);
   });
   recorder = child;
+  recorder.sampleRate = sampleRate;
   setImmediate(() => {
-    waveFile(output, false);
+    waveFile(output, false, sampleRate);
     if (current.failBeforeReady) {
       child.message({ type: 'error', message: 'Test activation failure' });
       child.finish(1);
       return;
     }
-    const startedUnixMs = Date.now(),
-      startedMonotonicMs = Number(process.hrtime.bigint()) / 1e6;
+    const startAgeMs = current.nativeStartAgeMs ?? 0;
+    const startedUnixMs = Date.now() - startAgeMs,
+      startedMonotonicMs = Number(process.hrtime.bigint()) / 1e6 - startAgeMs;
     const ready = () => {
       if (child.exitCode !== null) return;
       child.message({
@@ -143,11 +150,13 @@ childProcess.spawn = (command, args) => {
         path: output,
         startedUnixMs,
         startedMonotonicMs,
-        sampleRate: 48000,
+        sampleRate,
         channels: 2,
         bitsPerSample: 16,
       });
     };
+    current.onReadyPrepared?.({ startedMonotonicMs, releaseReady: ready });
+    if (current.manualReady) return;
     if (current.readyDelay) setTimeout(ready, current.readyDelay);
     else ready();
   });
@@ -210,6 +219,9 @@ test.after(async () => {
         if (error.code !== 'ENOENT') throw error;
       });
   }
+  await fsp.unlink(path.join(testDirectory, 'settings.json')).catch((error) => {
+    if (error.code !== 'ENOENT') throw error;
+  });
   await fsp.rmdir(testDirectory);
 });
 
@@ -225,6 +237,8 @@ test('native level and finalized events retain the browser protocol event names'
     await client.wait((message) => message.type === 'audioFinal');
     const saved = await client.wait((message) => message.type === 'saved');
     assert.equal(saved.session.hasAudio, true);
+    assert.equal(recorder.sampleRate, 44100);
+    assert.equal(saved.session.audio.sampleRate, 44100);
     const stored = JSON.parse(
       await fsp.readFile(path.join(client.dataDir, saved.session.id + '.session.json'), 'utf8'),
     );
@@ -258,7 +272,13 @@ test('saved MIDI follows the WAV clock while retaining original capture timestam
         ],
       },
     };
-    client.send({ type: 'record', withAudio: true, pid: 123, name: 'Clock-mapped take' });
+    client.send({
+      type: 'record',
+      withAudio: true,
+      pid: 123,
+      sampleRate: 48000,
+      name: 'Clock-mapped take',
+    });
     await client.wait((message) => message.type === 'state' && message.recording);
     await new Promise((resolve) => setTimeout(resolve, 25));
     midiBridge.message({ type: 'midi', data: [144, 60, 100] });
@@ -288,6 +308,62 @@ test('saved MIDI follows the WAV clock while retaining original capture timestam
     assert.deepEqual(stored.events, session.events);
     assert.deepEqual(stored.audio.clockMap, session.audio.clockMap);
   } finally {
+    await client.close();
+  }
+});
+
+test('both Kontakt sample rates save and restore as valid audio with matching duration', async () => {
+  for (const sampleRate of [44100, 48000]) {
+    const client = await connect();
+    try {
+      client.send({ type: 'record', withAudio: true, pid: 123, sampleRate });
+      await client.wait((message) => message.type === 'state' && message.recording);
+      client.send({ type: 'stopRecord' });
+      const { session } = await client.wait((message) => message.type === 'saved');
+      assert.equal(recorder.sampleRate, sampleRate);
+      assert.equal(session.audio.sampleRate, sampleRate);
+      assert.equal(session.audio.frames, sampleRate / 10);
+      assert.equal(session.audio.duration, 0.1);
+      const restored = await fetch(
+        `http://127.0.0.1:${client.port}/api/session/${session.id}`,
+      ).then((r) => r.json());
+      assert.equal(restored.hasAudio, true);
+      assert.equal(restored.audio.sampleRate, sampleRate);
+    } finally {
+      await client.close();
+    }
+  }
+});
+
+test('capture rate validates before starting a helper and its preference persists', async () => {
+  let client = await connect();
+  try {
+    const before = recorderCount;
+    client.send({ type: 'record', withAudio: true, pid: 123, sampleRate: 96000 });
+    await client.wait((message) => message.type === 'notice' && /샘플레이트/.test(message.message));
+    assert.equal(recorderCount, before);
+    assert.equal(client.app.state().recording, null);
+    client.send({ type: 'settings', settings: { audioSampleRate: 48000 } });
+    await client.wait(
+      (message) => message.type === 'state' && message.settings.audioSampleRate === 48000,
+    );
+    await client.close();
+    client = await connect();
+    assert.equal(client.app.state().settings.audioSampleRate, 48000);
+    client.send({ type: 'settings', settings: { audioSampleRate: 96000 } });
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    assert.equal(client.app.state().settings.audioSampleRate, 48000);
+    client.send({ type: 'record', withAudio: true, pid: 123 });
+    await client.wait((message) => message.type === 'state' && message.recording);
+    assert.equal(recorder.sampleRate, 48000);
+    client.send({ type: 'stopRecord' });
+    await client.wait((message) => message.type === 'saved');
+  } finally {
+    client.clear();
+    client.send({ type: 'settings', settings: { audioSampleRate: 44100 } });
+    await client.wait(
+      (message) => message.type === 'state' && message.settings.audioSampleRate === 44100,
+    );
     await client.close();
   }
 });
@@ -354,13 +430,22 @@ test(
   async () => {
     const client = await connect();
     try {
-      behavior = { readyDelay: 80 };
+      let prepared;
+      const nativeStarted = new Promise((resolve) => (prepared = resolve));
+      behavior = { manualReady: true, nativeStartAgeMs: 50, onReadyPrepared: prepared };
       client.send({ type: 'record', withAudio: true, pid: 123 });
       await client.wait((message) => message.type === 'state' && message.starting);
-      midiBridge.message({ type: 'midi', data: [144, 60, 91], timestamp: 0 });
-      await new Promise((resolve) => setTimeout(resolve, 15));
-      midiBridge.message({ type: 'midi', data: [128, 60, 0], timestamp: 15 });
-      await client.wait((message) => message.type === 'state' && message.recording);
+      const { startedMonotonicMs, releaseReady } = await nativeStarted;
+      // Explicit native timestamps and a manual readiness gate make this independent
+      // of how long overloaded CI/browser work delays setTimeout callbacks.
+      midiBridge.message({ type: 'midi', data: [144, 60, 91], qpcTimestamp: startedMonotonicMs + 10 });
+      midiBridge.message({ type: 'midi', data: [128, 60, 0], qpcTimestamp: startedMonotonicMs + 25 });
+      const on = await client.wait((message) => message.type === 'midi' && message.data[0] === 144);
+      const off = await client.wait((message) => message.type === 'midi' && message.data[0] === 128);
+      assert.equal(client.app.state().starting, true);
+      assert.equal(client.app.state().recording, null, 'Both MIDI events arrived before native readiness');
+      releaseReady();
+      const active = await client.wait((message) => message.type === 'state' && message.recording);
       client.send({ type: 'stopRecord' });
       const saved = await client.wait((message) => message.type === 'saved');
       assert.deepEqual(
@@ -370,8 +455,13 @@ test(
           [128, 60, 0],
         ],
       );
-      assert.ok(saved.session.events[1].t > saved.session.events[0].t);
-      assert.ok(saved.session.events[1].t < 0.08);
+      assert.deepEqual(
+        saved.session.events.map((event) => event.t),
+        [on.t - active.recording.startedAt, off.t - active.recording.startedAt],
+        'Pre-ready events retain their captured times relative to the native audio start',
+      );
+      assert.ok(Math.abs((saved.session.events[1].t - saved.session.events[0].t) - 0.015) < 0.002,
+        'Explicit native note timestamps preserve the 15 ms interval');
     } finally {
       await client.close();
     }
