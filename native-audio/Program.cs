@@ -20,6 +20,8 @@ internal static class Program
         throw new ArgumentException("Sample rate must be 44100 or 48000 Hz and match Kontakt's Audio settings.");
     }
 
+    internal static bool IsKontaktProcessName(string name) => name.StartsWith("Kontakt", StringComparison.OrdinalIgnoreCase);
+
     [MTAThread]
     private static int Main(string[] args)
     {
@@ -29,7 +31,7 @@ internal static class Program
             if (args.Contains("--self-test")) return SelfTest.Run();
             if (args.Contains("--list") || args.Contains("--probe"))
             {
-                var processes = Process.GetProcesses().Where(p => p.ProcessName.StartsWith("Kontakt", StringComparison.OrdinalIgnoreCase))
+                var processes = Process.GetProcesses().Where(p => IsKontaktProcessName(p.ProcessName))
                     .Select(p => new { pid = p.Id, name = p.ProcessName }).ToArray();
                 Emit(new { type = "processes", supported = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041),
                     osVersion = Environment.OSVersion.Version.ToString(), processes });
@@ -46,6 +48,8 @@ internal static class Program
                 throw new ArgumentException("Usage: ProcessAudio --pid <process id> --output <new .wav path> [--sample-rate 44100|48000] [--seconds <duration>] | --probe | --self-test");
             uint sampleRate = ParseSampleRate(Value("--sample-rate"));
             using var process = Process.GetProcessById(pid);
+            if (!IsKontaktProcessName(process.ProcessName))
+                throw new ArgumentException("Selected process is not Kontakt. Refresh the audio source and select Kontakt again.");
             var path = Path.GetFullPath(output);
             if (!Path.GetExtension(path).Equals(".wav", StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException("Output must have a .wav extension.");
@@ -332,6 +336,9 @@ internal static class SelfTest
                 BitConverter.ToUInt32(bytes, 24) != 48000 || bytes[44 + 2400 * 4] != 255 || bytes[44 + 2400 * 4 + 3] != 128)
                 throw new Exception("WAV header, duration, or PCM sample test failed.");
             TestPacketTimeline();
+            if (!Program.IsKontaktProcessName("Kontakt 7") || !Program.IsKontaktProcessName("Kontakt") ||
+                Program.IsKontaktProcessName("notepad") || Program.IsKontaktProcessName(""))
+                throw new Exception("Kontakt-only process validation failed.");
             if (Program.ParseSampleRate(null) != 44100 || Program.ParseSampleRate("44100") != 44100 ||
                 Program.ParseSampleRate("48000") != 48000)
                 throw new Exception("Capture sample-rate defaults or supported rates failed.");
@@ -344,7 +351,7 @@ internal static class SelfTest
                 BitConverter.ToUInt32(rateBytes, 40) != 17640)
                 throw new Exception("44.1 kHz WAV header or duration failed.");
             Program.Emit(new { type = "self-test", passed = true, frames = 4800, bytes = bytes.Length,
-                tests = new[] { "wave-header", "pcm-samples", "qpc-clock-drift", "device-frame-gap", "timestamp-recovery", "device-clock-reset", "initial-frame-anchor", "unavailable-device-counter", "bounded-clock-map", "capture-sample-rates" } });
+                tests = new[] { "wave-header", "pcm-samples", "qpc-clock-drift", "device-frame-gap", "timestamp-recovery", "device-clock-reset", "initial-frame-anchor", "unavailable-device-counter", "bounded-clock-map", "capture-sample-rates", "kontakt-only-process" } });
             return 0;
         }
         finally { File.Delete(path); File.Delete(path + ".44100"); }

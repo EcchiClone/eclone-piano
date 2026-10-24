@@ -23,6 +23,8 @@ let socket,
   audioPlayPending = null,
   audioPlayBlocked = false,
   audioRevision = 0,
+  audioLoadRevision = 0,
+  recordPreparing = false,
   exportAbort = null,
   exporting = false,
   renderFrames = 0,
@@ -257,6 +259,7 @@ function connectSocket() {
       const oldId = oldTransport?.sessionId;
       const transportChanged = changedTransport(oldTransport, msg.transport);
       state = msg;
+      if (state.starting || state.recording || state.stopping) recordPreparing = false;
       offset = msg.serverTime - performance.now() / 1000;
       count = msg.midiCount;
       if (msg.type === 'hello') {
@@ -292,8 +295,14 @@ function connectSocket() {
     } else if (msg.type === 'pong') {
       const received = performance.now() / 1000;
       offset = msg.serverTime - (received + msg.echo) / 2;
-    } else if (msg.type === 'notice') toast(msg.message, msg.kind);
-    else if (msg.type === 'audioLevel') {
+    } else if (msg.type === 'notice') {
+      if (msg.kind === 'error') {
+        recordPreparing = false;
+        updateUI();
+      }
+      toast(msg.message, msg.kind);
+      if (msg.code === 'AUDIO_SOURCE_CHANGED') loadAudio();
+    } else if (msg.type === 'audioLevel') {
       if (!viewer) {
         $('audioMeter').style.width = Math.min(100, Math.sqrt(msg.peak) * 100) + '%';
         if (state?.recording)
@@ -315,6 +324,8 @@ function connectSocket() {
     }
   };
   socket.onclose = () => {
+    recordPreparing = false;
+    updateUI();
     if (!viewer) {
       $('serverState').classList.remove('online');
       $('serverState').innerHTML = '<i></i> 재연결 중';
@@ -330,7 +341,7 @@ function updateUI() {
     tr = state.transport,
     liveMode = tr.mode === 'live',
     demoMode = tr.mode === 'demo',
-    busy = !!(state.recording || state.starting || state.stopping);
+    busy = !!(state.recording || state.starting || state.stopping || recordPreparing);
   $('modeTag').innerHTML = `<i></i> ${liveMode ? 'LIVE' : demoMode ? 'DEMO' : 'REPLAY'}`;
   $('modeTag').className = 'mode-tag ' + (demoMode ? 'demo' : liveMode ? '' : 'replay');
   $('stageCaption').textContent = liveMode
@@ -416,14 +427,17 @@ function updateUI() {
   $('midiLight').classList.toggle('connected', state.midiStatus.connected);
   $('eventCount').textContent = count.toLocaleString() + ' events';
   $('recordButton').classList.toggle('recording', !!state.recording);
-  $('recordLabel').textContent = state.starting
-    ? '오디오 연결 중…'
-    : state.stopping
-      ? '저장 중…'
-      : state.recording
-        ? '녹음 종료'
-        : '녹음 시작';
-  $('recordButton').disabled = !!(state.starting || state.stopping);
+  $('recordLabel').textContent = recordPreparing
+    ? 'Kontakt 확인 중…'
+    : state.starting
+      ? '오디오 연결 중…'
+      : state.stopping
+        ? '저장 중…'
+        : state.recording
+          ? '녹음 종료'
+          : '녹음 시작';
+  $('recordButton').disabled = !!(recordPreparing || state.starting || state.stopping);
+  $('refreshAudio').disabled = busy;
   for (const id of ['takeName', 'audioProcess', 'withAudio']) $(id).disabled = busy;
   $('audioProcess').disabled = busy || !$('withAudio').checked;
   $('audioSampleRate').disabled = busy || !$('withAudio').checked;
@@ -435,19 +449,51 @@ function updateUI() {
       '연주 데이터와 원음을 따로 보관해 언제든 다시 스타일링할 수 있어요.';
   }
 }
-async function loadAudio() {
+async function loadAudio({ strict = false } = {}) {
   if (viewer) return;
+  const revision = ++audioLoadRevision;
+  const selected = $('audioProcess').value;
+  const abort = new AbortController();
+  const timeout = setTimeout(() => abort.abort(), 8000);
   try {
-    const r = await fetch('/api/audio');
+    const r = await fetch('/api/audio', { signal: abort.signal });
     const data = await r.json();
-    $('audioProcess').innerHTML = (data.processes || []).length
-      ? data.processes
-          .map((p) => `<option value="${p.pid}">${escape(p.name)} · ${p.pid}</option>`)
-          .join('')
-      : '<option value="">Kontakt를 실행하세요</option>';
-    if (data.error) toast(data.error, 'error');
-  } catch {
-    toast('오디오 장치 정보를 읽지 못했습니다.', 'error');
+    if (!r.ok || data.error)
+      throw new Error(
+        data.error
+          ? 'Kontakt 목록을 확인하지 못했습니다. ' + data.error
+          : '오디오 소스를 확인하지 못했습니다.',
+      );
+    if (revision !== audioLoadRevision) return null;
+    const processes = (data.processes || []).filter((p) => Number.isInteger(p.pid) && p.pid > 0);
+    const choice = processes.some((p) => String(p.pid) === selected)
+      ? selected
+      : processes.length === 1
+        ? String(processes[0].pid)
+        : '';
+    const placeholder = processes.length ? '녹음할 Kontakt를 선택하세요' : 'Kontakt를 실행하세요';
+    $('audioProcess').innerHTML =
+      (choice ? '' : `<option value="">${placeholder}</option>`) +
+      processes
+        .map((p) => `<option value="${p.pid}">${escape(p.name)} · ${p.pid}</option>`)
+        .join('');
+    $('audioProcess').value = choice;
+    return { pid: Number(choice) || null, count: processes.length };
+  } catch (error) {
+    if (revision === audioLoadRevision)
+      $('audioProcess').innerHTML = '<option value="">오디오 소스 확인 필요</option>';
+    const failure = new Error(
+      error.name === 'AbortError'
+        ? 'Kontakt 확인 시간이 초과됐습니다. 잠시 후 다시 시도하세요.'
+        : error.message === 'Failed to fetch'
+          ? '오디오 소스 정보를 읽지 못했습니다. 다시 시도하세요.'
+          : error.message,
+    );
+    if (strict) throw failure;
+    toast(failure.message, 'error');
+    return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 async function loadLibrary() {
@@ -678,23 +724,41 @@ if (!viewer) {
   $('withAudio').onchange = () => updateUI();
   $('audioSampleRate').onchange = () =>
     setSettings({ audioSampleRate: Number($('audioSampleRate').value) });
-  $('recordButton').onclick = () => {
+  $('recordButton').onclick = async () => {
+    if (recordPreparing || state?.starting || state?.stopping) return;
     if (state?.recording) {
       send({ type: 'stopRecord' });
       return;
     }
-    const pid = Number($('audioProcess').value);
-    if ($('withAudio').checked && !pid) {
-      toast('Kontakt를 실행한 뒤 오디오 소스 새로고침을 눌러 주세요.', 'error');
-      return;
+    recordPreparing = true;
+    updateUI();
+    let sent = false;
+    try {
+      const withAudio = $('withAudio').checked;
+      const source = withAudio ? await loadAudio({ strict: true }) : null;
+      if (withAudio && !source?.pid)
+        throw new Error(
+          source?.count > 1
+            ? 'Kontakt가 여러 개 실행 중입니다. 녹음할 소스를 선택한 뒤 다시 시작하세요.'
+            : '실행 중인 Kontakt를 찾지 못했습니다. Kontakt를 실행한 뒤 다시 녹음하세요.',
+        );
+      if (state?.recording || state?.starting || state?.stopping)
+        throw new Error('다른 화면에서 녹음 상태가 바뀌었습니다. 현재 상태를 확인하세요.');
+      if (socket?.readyState !== 1) throw new Error('서버 연결을 기다린 뒤 다시 녹음하세요.');
+      send({
+        type: 'record',
+        name: $('takeName').value,
+        withAudio,
+        pid: source?.pid,
+        sampleRate: Number($('audioSampleRate').value),
+      });
+      sent = true;
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      if (!sent) recordPreparing = false;
+      updateUI();
     }
-    send({
-      type: 'record',
-      name: $('takeName').value,
-      withAudio: $('withAudio').checked,
-      pid,
-      sampleRate: Number($('audioSampleRate').value),
-    });
   };
   $('sessionList').onclick = (e) => {
     const play = e.target.closest('[data-play]'),

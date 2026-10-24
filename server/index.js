@@ -112,6 +112,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     stopping = false,
     closing = false;
   let startTask = null,
+    startProbe = null,
     stopTask = null;
   let transport = { mode: 'live', sessionId: null, position: 0, playing: false, startedAt: now() },
     transportDuration = 0;
@@ -529,7 +530,16 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     'net9.0-windows',
     'ProcessAudio.dll',
   );
-  async function probeAudio() {
+  function audioSourceChanged(detail = '') {
+    return Object.assign(
+      new Error(
+        '선택한 Kontakt가 종료되었거나 오디오 소스가 변경됐습니다. 오디오 소스를 새로고침한 뒤 다시 녹음해 주세요.' +
+          (detail ? ` (${detail})` : ''),
+      ),
+      { code: 'AUDIO_SOURCE_CHANGED' },
+    );
+  }
+  async function probeAudio({ signal } = {}) {
     if (!existsSync(helper))
       return {
         supported: false,
@@ -538,17 +548,46 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       };
     return await new Promise((resolve) => {
       const child = spawn('dotnet', [helper, '--list'], { windowsHide: true });
-      let result = '';
+      let result = '',
+        settled = false;
+      const finish = (value, kill = false) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        signal?.removeEventListener('abort', abort);
+        if (kill) child.kill();
+        resolve(value);
+      };
+      const abort = () =>
+        finish({ error: '앱 종료로 Kontakt 확인을 취소했습니다.', processes: [] }, true);
+      const timeout = setTimeout(
+        () =>
+          finish(
+            {
+              error: 'Kontakt 프로세스 확인 시간 초과 (5초). 오디오 소스를 새로고침해 주세요.',
+              processes: [],
+            },
+            true,
+          ),
+        5000,
+      );
       child.stdout.on('data', (d) => (result += d));
-      child.on('error', (e) => resolve({ error: e.message, processes: [] }));
-      child.on('close', () => {
+      child.on('error', (e) => finish({ error: e.message, processes: [] }));
+      child.on('close', (code) => {
         try {
           const lines = result.trim().split(/\r?\n/);
-          resolve(JSON.parse(lines.at(-1)));
+          const response = JSON.parse(lines.at(-1));
+          if (code !== 0 || response.type !== 'processes' || !Array.isArray(response.processes))
+            throw new Error(
+              response.message || result || 'Kontakt 프로세스 목록 응답이 올바르지 않습니다.',
+            );
+          finish(response);
         } catch {
-          resolve({ error: result || 'Kontakt 프로세스를 찾지 못했습니다.', processes: [] });
+          finish({ error: result || 'Kontakt 프로세스를 찾지 못했습니다.', processes: [] });
         }
       });
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
     });
   }
   function startCapture(id, pid, sampleRate) {
@@ -627,7 +666,12 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         broadcast({ type: 'notice', kind: 'warning', message: msg.message });
       if (msg.type === 'error') {
         clearTimeout(timeout);
-        fail(new Error(msg.message + (msg.hresult ? ` (${msg.hresult})` : '')));
+        const detail = msg.message + (msg.hresult ? ` (${msg.hresult})` : '');
+        fail(
+          /process.*(?:not running|has exited)|selected process is not Kontakt/i.test(msg.message)
+            ? audioSourceChanged(detail)
+            : new Error(detail),
+        );
       }
       if (msg.type === 'stopped') {
         run.final = msg;
@@ -735,6 +779,29 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         const sampleRate = payload.sampleRate ?? settings.audioSampleRate;
         if (!AUDIO_SAMPLE_RATES.includes(sampleRate))
           throw new Error('Kontakt 샘플레이트는 44,100 또는 48,000 Hz를 선택하세요.');
+        const controller = new AbortController();
+        startProbe = controller;
+        let sources;
+        try {
+          sources = await probeAudio({ signal: controller.signal });
+        } finally {
+          if (startProbe === controller) startProbe = null;
+        }
+        if (closing) throw new Error('앱 종료로 녹음을 취소했습니다.');
+        if (sources.error || sources.supported !== true)
+          throw new Error(
+            'Kontakt 오디오 소스를 확인하지 못했습니다. ' +
+              (sources.error || '이 Windows에서는 프로세스 오디오 캡처를 지원하지 않습니다.'),
+          );
+        if (
+          !sources.processes.some(
+            (source) =>
+              source.pid === payload.pid &&
+              typeof source.name === 'string' &&
+              /^Kontakt/i.test(source.name),
+          )
+        )
+          throw audioSourceChanged();
         audio = run = startCapture(id, payload.pid, sampleRate);
         await run.readyPromise;
         startedAt = run.startedAt;
@@ -1524,7 +1591,14 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         await command(msg);
       } catch (e) {
         if (ws.readyState === 1)
-          ws.send(JSON.stringify({ type: 'notice', kind: 'error', message: e.message }));
+          ws.send(
+            JSON.stringify({
+              type: 'notice',
+              kind: 'error',
+              message: e.message,
+              ...(e.code === 'AUDIO_SOURCE_CHANGED' ? { code: e.code } : {}),
+            }),
+          );
       }
     });
     ws.on('close', () => clients.delete(ws));
@@ -1554,6 +1628,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     port,
     close: async () => {
       closing = true;
+      startProbe?.abort();
       clearInterval(expireExports);
       await Promise.all([...exportUploads.values()].map(cancelExport));
       clearInterval(playbackClock);

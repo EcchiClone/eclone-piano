@@ -13,9 +13,12 @@ if (!info.supported || !info.processes.length) {
   console.log('Live capture skipped: compatible Windows and a running Kontakt process are required.');
   process.exit(0);
 }
+const selectedPid = Number(process.argv[2]) || (info.processes.length === 1 ? info.processes[0].pid : 0);
+if (!info.processes.some(process => process.pid === selectedPid))
+  throw new Error('Select an explicit current Kontakt PID when multiple instances are running.');
 const directory = await mkdtemp(join(tmpdir(), 'piano-process-audio-'));
 const output = join(directory, 'smoke.wav');
-const child = spawn('dotnet', [dll, '--pid', String(info.processes[0].pid), '--output', output, '--seconds', '1'], { windowsHide: true });
+const child = spawn('dotnet', [dll, '--pid', String(selectedPid), '--output', output, '--sample-rate', '44100', '--seconds', '1'], { windowsHide: true });
 let stdout = '', stderr = '';
 child.stdout.on('data', data => { stdout += data; });
 child.stderr.on('data', data => { stderr += data; });
@@ -30,7 +33,7 @@ try {
   assert.ok(stopped && stopped.durationMs >= 900 && stopped.durationMs < 2000);
   const wav = await readFile(output);
   assert.equal(wav.readUInt32LE(40), wav.length - 44);
-  assert.equal(wav.readUInt32LE(24), 48000);
+  assert.equal(wav.readUInt32LE(24), 44100);
   assert.equal(wav.readUInt16LE(22), 2);
   console.log('Process-loopback activation, one-second capture, and finalized WAV passed. Silence is expected when Kontakt is idle.');
 } finally {

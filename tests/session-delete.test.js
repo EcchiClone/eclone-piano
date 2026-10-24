@@ -81,6 +81,18 @@ childProcess.spawn = (command, args) => {
     return child;
   }
   assert.equal(command, 'dotnet', 'Deletion tests must never launch real helpers.');
+  if (args.includes('--list')) {
+    const child = fakeChild();
+    setImmediate(() => {
+      child.message({
+        type: 'processes',
+        supported: true,
+        processes: [{ pid: 123, name: 'Kontakt Test' }],
+      });
+      child.finish();
+    });
+    return child;
+  }
   const behavior = { ...audioBehavior };
   const output = args[args.indexOf('--output') + 1];
   const sampleRate = Number(args[args.indexOf('--sample-rate') + 1]);

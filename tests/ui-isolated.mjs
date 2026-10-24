@@ -17,3 +17,4 @@ try {
 }
 await import('./playback-settings.mjs');
 await import('./playback-clock.mjs');
+await import('./audio-source-refresh.mjs');

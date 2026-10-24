@@ -21,6 +21,7 @@ let behavior = {};
 let recorder;
 let midiBridge;
 let recorderCount = 0;
+let probeCount = 0;
 
 function waveFile(file, finalized = true, sampleRate = 48000) {
   const data = Buffer.alloc(44 + (sampleRate / 10) * 4);
@@ -83,20 +84,26 @@ childProcess.spawn = (command, args) => {
   }
   if (command !== 'dotnet') throw new Error(`Unexpected subprocess in audio test: ${command}`);
   if (args.includes('--list')) {
+    probeCount++;
+    const current = { ...behavior };
     const child = fakeChild();
-    setImmediate(() => {
+    const deliver = () => {
+      if (child.exitCode !== null) return;
       child.message({
         type: 'processes',
         supported: true,
-        processes: [{ pid: 123, name: 'Kontakt Test' }],
+        processes: current.processes ?? [{ pid: 123, name: 'Kontakt Test' }],
       });
       child.finish();
-    });
+    };
+    current.onProbeCreated?.({ child, deliver });
+    if (!current.manualProbe) setImmediate(deliver);
     return child;
   }
   const current = { ...behavior };
   recorderCount++;
   const output = args[args.indexOf('--output') + 1];
+  const pid = Number(args[args.indexOf('--pid') + 1]);
   const sampleRate = Number(args[args.indexOf('--sample-rate') + 1]);
   assert.ok(
     [44100, 48000].includes(sampleRate),
@@ -131,11 +138,12 @@ childProcess.spawn = (command, args) => {
     }, current.stopDelay ?? 5);
   });
   recorder = child;
+  recorder.pid = pid;
   recorder.sampleRate = sampleRate;
   setImmediate(() => {
     waveFile(output, false, sampleRate);
     if (current.failBeforeReady) {
-      child.message({ type: 'error', message: 'Test activation failure' });
+      child.message({ type: 'error', message: current.startupError ?? 'Test activation failure' });
       child.finish(1);
       return;
     }
@@ -146,7 +154,7 @@ childProcess.spawn = (command, args) => {
       if (child.exitCode !== null) return;
       child.message({
         type: 'ready',
-        pid: 123,
+        pid,
         path: output,
         startedUnixMs,
         startedMonotonicMs,
@@ -339,9 +347,11 @@ test('capture rate validates before starting a helper and its preference persist
   let client = await connect();
   try {
     const before = recorderCount;
+    const probesBefore = probeCount;
     client.send({ type: 'record', withAudio: true, pid: 123, sampleRate: 96000 });
     await client.wait((message) => message.type === 'notice' && /샘플레이트/.test(message.message));
     assert.equal(recorderCount, before);
+    assert.equal(probeCount, probesBefore, 'Invalid rate is rejected before native enumeration');
     assert.equal(client.app.state().recording, null);
     client.send({ type: 'settings', settings: { audioSampleRate: 48000 } });
     await client.wait(
@@ -366,6 +376,87 @@ test('capture rate validates before starting a helper and its preference persist
     );
     await client.close();
   }
+});
+
+test('stale or non-Kontakt PIDs are rejected without capturing another process', async () => {
+  for (const processes of [
+    [],
+    [{ pid: 456, name: 'Kontakt 7' }],
+    [{ pid: 123, name: 'notepad' }],
+  ]) {
+    const client = await connect();
+    try {
+      behavior = { processes };
+      const before = recorderCount,
+        probesBefore = probeCount;
+      client.send({ type: 'record', withAudio: true, pid: 123 });
+      const notice = await client.wait(
+        (message) => message.type === 'notice' && message.code === 'AUDIO_SOURCE_CHANGED',
+      );
+      assert.match(notice.message, /오디오 소스를 새로고침/);
+      assert.equal(recorderCount, before);
+      assert.equal(probeCount, probesBefore + 1);
+      assert.equal(client.app.state().recording, null);
+      assert.equal(client.app.state().starting, false);
+    } finally {
+      await client.close();
+    }
+  }
+});
+
+test('fresh enumeration captures only the explicitly selected current Kontakt PID', async () => {
+  const client = await connect();
+  try {
+    behavior = {
+      processes: [
+        { pid: 123, name: 'Kontakt 7' },
+        { pid: 456, name: 'Kontakt 8' },
+      ],
+    };
+    client.send({ type: 'record', withAudio: true, pid: 456 });
+    await client.wait((message) => message.type === 'state' && message.recording);
+    assert.equal(recorder.pid, 456);
+    client.send({ type: 'stopRecord' });
+    await client.wait((message) => message.type === 'saved');
+  } finally {
+    await client.close();
+  }
+});
+
+test('a process exiting between preflight and activation reports a refresh hint with its native detail', async () => {
+  const client = await connect();
+  try {
+    behavior = { failBeforeReady: true, startupError: 'Process with an Id of 123 is not running.' };
+    client.send({ type: 'record', withAudio: true, pid: 123 });
+    const notice = await client.wait(
+      (message) => message.type === 'notice' && message.code === 'AUDIO_SOURCE_CHANGED',
+    );
+    assert.match(notice.message, /새로고침/);
+    assert.match(notice.message, /Process with an Id of 123 is not running/);
+    assert.equal(client.app.state().recording, null);
+  } finally {
+    await client.close();
+  }
+});
+
+test('closing during process enumeration cancels the probe and never launches a recorder', async () => {
+  const client = await connect();
+  let prepared;
+  const probed = new Promise((resolve) => (prepared = resolve));
+  behavior = { manualProbe: true, onProbeCreated: prepared };
+  const before = recorderCount,
+    probesBefore = probeCount;
+  client.send({ type: 'record', withAudio: true, pid: 123 });
+  const { child } = await probed;
+  assert.equal(client.app.state().starting, true);
+  client.send({ type: 'record', withAudio: true, pid: 123 });
+  await client.wait((message) => message.type === 'notice' && /준비 중/.test(message.message));
+  assert.equal(probeCount, probesBefore + 1, 'A second request cannot start another probe');
+  await client.close();
+  assert.equal(child.killed, true);
+  assert.equal(recorderCount, before);
+  assert.equal(client.app.state().starting, false);
+  assert.equal(client.app.state().recording, null);
 });
 
 test('failed audio startup does not leave a dead helper attached to the next MIDI-only take', async () => {
@@ -438,12 +529,26 @@ test(
       const { startedMonotonicMs, releaseReady } = await nativeStarted;
       // Explicit native timestamps and a manual readiness gate make this independent
       // of how long overloaded CI/browser work delays setTimeout callbacks.
-      midiBridge.message({ type: 'midi', data: [144, 60, 91], qpcTimestamp: startedMonotonicMs + 10 });
-      midiBridge.message({ type: 'midi', data: [128, 60, 0], qpcTimestamp: startedMonotonicMs + 25 });
+      midiBridge.message({
+        type: 'midi',
+        data: [144, 60, 91],
+        qpcTimestamp: startedMonotonicMs + 10,
+      });
+      midiBridge.message({
+        type: 'midi',
+        data: [128, 60, 0],
+        qpcTimestamp: startedMonotonicMs + 25,
+      });
       const on = await client.wait((message) => message.type === 'midi' && message.data[0] === 144);
-      const off = await client.wait((message) => message.type === 'midi' && message.data[0] === 128);
+      const off = await client.wait(
+        (message) => message.type === 'midi' && message.data[0] === 128,
+      );
       assert.equal(client.app.state().starting, true);
-      assert.equal(client.app.state().recording, null, 'Both MIDI events arrived before native readiness');
+      assert.equal(
+        client.app.state().recording,
+        null,
+        'Both MIDI events arrived before native readiness',
+      );
       releaseReady();
       const active = await client.wait((message) => message.type === 'state' && message.recording);
       client.send({ type: 'stopRecord' });
@@ -460,8 +565,10 @@ test(
         [on.t - active.recording.startedAt, off.t - active.recording.startedAt],
         'Pre-ready events retain their captured times relative to the native audio start',
       );
-      assert.ok(Math.abs((saved.session.events[1].t - saved.session.events[0].t) - 0.015) < 0.002,
-        'Explicit native note timestamps preserve the 15 ms interval');
+      assert.ok(
+        Math.abs(saved.session.events[1].t - saved.session.events[0].t - 0.015) < 0.002,
+        'Explicit native note timestamps preserve the 15 ms interval',
+      );
     } finally {
       await client.close();
     }
