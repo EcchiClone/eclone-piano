@@ -76,7 +76,7 @@ try {
     }),
   );
   server = await startServer({
-    port: Number(process.env.LUMA_EXPORT_TEST_PORT || 0),
+    port: Number(process.env.ECLONE_EXPORT_TEST_PORT || process.env.LUMA_EXPORT_TEST_PORT || 0),
     dataDir: recordingRoot,
   });
   const { port } = server;
@@ -178,7 +178,9 @@ try {
     'Incorrect declared count and 143/144 decoded frames rejected; partial files cleaned';
   browser = await chromium.launch({
     executablePath:
-      process.env.LUMA_TEST_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      process.env.ECLONE_TEST_BROWSER ||
+      process.env.LUMA_TEST_BROWSER ||
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     headless: true,
     args: ['--autoplay-policy=no-user-gesture-required'],
   });
@@ -203,7 +205,7 @@ try {
     };
   });
   await page.goto(base);
-  await page.waitForFunction(() => window.lumaDiagnostics()?.mode === 'live');
+  await page.waitForFunction(() => window.ecloneDiagnostics()?.mode === 'live');
   await page.locator(`[data-export="${id}"]`).click();
   await page.waitForFunction(() => !document.getElementById('exportDownload').hidden, null, {
     timeout: 90000,

@@ -54,14 +54,41 @@ try {
   server = await startServer({ port: 3227, dataDir });
   browser = await chromium.launch({
     executablePath:
-      process.env.LUMA_TEST_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      process.env.ECLONE_TEST_BROWSER ||
+      process.env.LUMA_TEST_BROWSER ||
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     headless: true,
     args: ['--autoplay-policy=no-user-gesture-required', '--mute-audio'],
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.on('pageerror', (error) => report.errors.push(error.message));
   await page.addInitScript((fixtureId) => {
-    window.clockProbe = { audio: [], seeks: [], events: [], phase: 'delayed-start' };
+    window.clockProbe = {
+      audio: [],
+      seeks: [],
+      events: [],
+      heldPauseMessages: [],
+      holdPauseAck: false,
+      phase: 'delayed-start',
+    };
+    const NativeSocket = window.WebSocket;
+    window.WebSocket = class extends NativeSocket {
+      constructor(...args) {
+        super(...args);
+        this.addEventListener('message', (event) => {
+          const message = JSON.parse(event.data);
+          if (
+            window.clockProbe.holdPauseAck &&
+            message.type === 'state' &&
+            !message.transport.playing &&
+            message.transport.reason !== 'ended'
+          ) {
+            event.stopImmediatePropagation();
+            window.clockProbe.heldPauseMessages.push({ socket: this, data: event.data });
+          }
+        });
+      }
+    };
     const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
     Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', {
       ...descriptor,
@@ -104,7 +131,7 @@ try {
   const inspect = () =>
     page.evaluate(() => ({
       audio: window.clockProbe.audio[0].currentTime,
-      visual: window.lumaDiagnostics().position,
+      visual: window.ecloneDiagnostics().position,
       paused: window.clockProbe.audio[0].paused,
       ended: window.clockProbe.audio[0].ended,
       button: document.getElementById('playButton').textContent,
@@ -125,7 +152,7 @@ try {
   while (server.state().transport.reason !== 'ended' && Date.now() < deadline)
     await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(server.state().transport.reason, 'ended');
-  await page.waitForFunction(() => window.lumaDiagnostics().position > 2);
+  await page.waitForFunction(() => window.ecloneDiagnostics().position > 2);
   report.tail = await inspect();
   assert.equal(
     report.tail.paused,
@@ -136,7 +163,7 @@ try {
   assert.ok(report.tail.audio < duration - 0.25, 'A meaningful audible tail must still remain.');
   assert.equal(report.tail.button, 'Ⅱ');
   assert.ok(Math.abs(report.tail.visual - report.tail.audio) < 0.01);
-  report.remoteStagePosition = await stage.evaluate(() => window.lumaDiagnostics().position);
+  report.remoteStagePosition = await stage.evaluate(() => window.ecloneDiagnostics().position);
   assert.ok(
     Math.abs(report.remoteStagePosition - duration) < 0.01,
     'Silent remote viewers retain server-clock behavior.',
@@ -149,11 +176,12 @@ try {
 
   await page.evaluate(() => {
     window.clockProbe.phase = 'manual-tail-pause';
+    window.clockProbe.holdPauseAck = true;
   });
   await page.locator('#playButton').click();
   await page.waitForFunction(() => window.clockProbe.audio[0].paused);
-  while (server.state().transport.reason === 'ended' && Date.now() < deadline)
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  // Hold the server acknowledgement: local audio and its button must agree immediately.
+  await page.waitForFunction(() => window.clockProbe.heldPauseMessages.length > 0);
   report.manualPause = await inspect();
   report.pausedServerPosition = server.state().transport.position;
   assert.equal(server.state().transport.reason, undefined);
@@ -162,12 +190,22 @@ try {
     'Manual pause must save the actual audible position.',
   );
   assert.equal(report.manualPause.button, '▶');
+  report.pauseButtonUpdatedBeforeServerAck = true;
 
   await page.evaluate(() => {
+    window.clockProbe.holdPauseAck = false;
+    for (const message of window.clockProbe.heldPauseMessages.splice(0))
+      message.socket.dispatchEvent(new MessageEvent('message', { data: message.data }));
     window.clockProbe.phase = 'resume-tail';
   });
   await page.locator('#playButton').click();
-  await page.waitForFunction(() => window.clockProbe.audio[0].ended, null, { timeout: 6000 });
+  await page.waitForFunction(
+    () =>
+      window.clockProbe.audio[0].ended &&
+      window.clockProbe.events.some((event) => event.type === 'ended'),
+    null,
+    { timeout: 6000 },
+  );
   report.finished = await inspect();
   report.events = await page.evaluate(() => window.clockProbe.events);
   report.seeks = await page.evaluate(() => window.clockProbe.seeks);

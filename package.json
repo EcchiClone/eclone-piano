@@ -1,20 +1,22 @@
 {
-  "name": "luma-piano",
-  "version": "0.1.4",
+  "name": "eclone-piano",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
-  "description": "Kontakt performance studio, MIDI visualizer and transparent desktop overlay",
+  "description": "EClone Games MIDI visualization studio with Kontakt recording, 60fps export, OBS scenes and desktop overlay",
   "main": "desktop/main.cjs",
   "scripts": {
     "start": "electron .",
     "serve": "node server/index.js",
     "test": "node --test tests/*.test.js",
     "build:audio": "dotnet build native-audio -c Release",
-    "check": "node --check server/index.js && node --check public/app.js && node --check desktop/main.cjs",
+    "doctor": "node scripts/doctor.mjs",
+    "setup": "npm run build:audio && npm run doctor",
+    "check": "node --check server/index.js && node --check public/app.js && node --check public/engine.js && node --check public/offline-video.js && node --check desktop/main.cjs && node --check scripts/doctor.mjs",
     "test:ui": "node tests/ui-isolated.mjs",
     "test:desktop": "node tests/desktop-smoke.mjs",
     "test:export": "node tests/export-smoke.mjs",
-    "format": "prettier --write public server desktop tests package.json README.md"
+    "format": "prettier --write public server desktop scripts tests package.json README.md"
   },
   "dependencies": {
     "ws": "^8.18.3"
@@ -26,5 +28,15 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "license": "MIT",
+  "author": "EClone Games",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EcchiClone/eclone-piano.git"
+  },
+  "homepage": "https://github.com/EcchiClone/eclone-piano#readme",
+  "bugs": {
+    "url": "https://github.com/EcchiClone/eclone-piano/issues"
   }
 }

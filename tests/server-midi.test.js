@@ -127,7 +127,7 @@ async function setup({
   frozenNow = null;
   initialInputs = inputs;
   failOpen = rejectOpen;
-  const dataDir = await fs.mkdtemp(path.join(tmpdir(), 'luma-server-midi-'));
+  const dataDir = await fs.mkdtemp(path.join(tmpdir(), 'eclone-server-midi-'));
   if (inputName)
     await fs.writeFile(path.join(dataDir, 'connection.json'), JSON.stringify({ inputName }));
   const app = await startServer({ port: 0, dataDir });

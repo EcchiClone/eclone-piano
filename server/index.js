@@ -115,7 +115,9 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     startProbe = null,
     stopTask = null;
   let transport = { mode: 'live', sessionId: null, position: 0, playing: false, startedAt: now() },
-    transportDuration = 0;
+    transportDuration = 0,
+    studioAudioOwnerId = null,
+    playbackRequest = 0;
   const controllers = new Map(),
     historyControllers = new Map(),
     history = [];
@@ -152,6 +154,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         }
       : null,
     transport,
+    studioAudioOwnerId,
     starting,
     stopping,
   });
@@ -486,6 +489,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       }
       if (transport.sessionId?.toLowerCase() === id) {
         transportDuration = 0;
+        studioAudioOwnerId = null;
         transport = {
           mode: 'live',
           sessionId: null,
@@ -823,6 +827,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         events,
       };
       transport = { mode: 'live', sessionId: null, position: 0, playing: false, startedAt: now() };
+      studioAudioOwnerId = null;
     } catch (error) {
       if (run) {
         await stopCapture(run);
@@ -905,7 +910,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     })();
     return stopTask;
   }
-  async function command(msg) {
+  async function command(msg, client) {
     switch (msg.type) {
       case 'refreshPorts':
         if (!bridge) startBridge();
@@ -982,6 +987,8 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         break;
       }
       case 'live':
+        playbackRequest++;
+        studioAudioOwnerId = null;
         transport = {
           mode: 'live',
           sessionId: null,
@@ -994,8 +1001,14 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       case 'play': {
         if (recording || starting || stopping)
           throw new Error('먼저 녹음을 종료하고 저장이 완료될 때까지 기다리세요.');
+        const request = ++playbackRequest;
         const session = await getSession(msg.sessionId || transport.sessionId || 'demo');
+        // Async reads must not revive an older Play after another transport action or disconnect.
+        if (request !== playbackRequest || client.readyState !== 1 || closing) return;
+        if (recording || starting || stopping)
+          throw new Error('먼저 녹음을 종료하고 저장이 완료될 때까지 기다리세요.');
         transportDuration = session.duration;
+        studioAudioOwnerId = session.hasAudio ? client.clientId : null;
         transport = {
           mode: session.id === 'demo' ? 'demo' : 'replay',
           sessionId: session.id,
@@ -1007,6 +1020,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         break;
       }
       case 'pause':
+        playbackRequest++;
         transport.position = Number.isFinite(msg.position)
           ? Math.min(transportDuration, Math.max(0, msg.position))
           : transport.position + (transport.playing ? now() - transport.startedAt : 0);
@@ -1016,6 +1030,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         publish();
         break;
       case 'seek':
+        playbackRequest++;
         transport.position = Math.min(transportDuration, Math.max(0, Number(msg.position) || 0));
         transport.startedAt = now();
         delete transport.reason;
@@ -1023,6 +1038,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         break;
       case 'record': {
         if (startTask) throw new Error('녹음을 준비 중입니다.');
+        playbackRequest++;
         const pending = beginRecording(msg);
         startTask = pending;
         try {
@@ -1571,15 +1587,17 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });
   wss.on('connection', (ws, req) => {
+    ws.clientId = randomUUID();
+    const viewer = new URL(req.url, 'http://127.0.0.1').searchParams.has('viewer');
     clients.add(ws);
     ws.send(
       JSON.stringify({
         ...state(),
         type: 'hello',
+        clientId: ws.clientId,
         history: bootstrapHistory(Math.max(0, now() - 20)),
       }),
     );
-    const viewer = new URL(req.url, 'http://127.0.0.1').searchParams.has('viewer');
     ws.on('message', async (data) => {
       try {
         const msg = JSON.parse(data);
@@ -1588,7 +1606,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
           return;
         }
         if (viewer) throw new Error('보기 전용 화면입니다.');
-        await command(msg);
+        await command(msg, ws);
       } catch (e) {
         if (ws.readyState === 1)
           ws.send(
@@ -1601,7 +1619,22 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
           );
       }
     });
-    ws.on('close', () => clients.delete(ws));
+    ws.on('close', () => {
+      clients.delete(ws);
+      if (studioAudioOwnerId !== ws.clientId) return;
+      studioAudioOwnerId = null;
+      if (transport.playing) {
+        transport.position = Math.min(
+          transportDuration,
+          transport.position + now() - transport.startedAt,
+        );
+        transport.playing = false;
+        transport.startedAt = now();
+        transport.reason = 'ownerDisconnected';
+      }
+      // Reconnection gets a fresh identity. Only an explicit Play starts audio again.
+      if (!closing) publish();
+    });
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -1622,7 +1655,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       publish();
     }
   }, 100);
-  console.log(`Luma Piano http://127.0.0.1:${port}`);
+  console.log(`EClone Piano http://127.0.0.1:${port}`);
   return {
     server,
     port,

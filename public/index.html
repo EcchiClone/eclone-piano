@@ -3,16 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Luma Piano — 연주를 빛으로</title>
+    <title>EClone Piano — 연주를 빛으로</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/" aria-label="Luma Piano 홈"
+      <a class="brand" href="/" aria-label="EClone Piano 홈"
         ><span class="brand-mark">◈</span
-        ><span
-          >LUMA<span class="brand-light"> PIANO</span><small>PERFORMANCE STUDIO</small></span
-        ></a
+        ><span>ECLONE<span class="brand-light"> PIANO</span><small>BY ECLONE GAMES</small></span></a
       >
       <nav>
         <button class="nav active" id="liveTab">라이브 스튜디오</button
@@ -238,7 +236,7 @@
             ><select id="noteRange">
               <option value="88">전체 88건반</option>
               <option value="61">61건반 · C2–C7</option>
-              <option value="49">49건반 · Keystation</option>
+              <option value="49">49건반 · C2–C6</option>
               <option value="37">중앙 37건반</option>
             </select>
           </div>
@@ -284,11 +282,13 @@
             <kbd>Ctrl Shift F12</kbd></small
           >
         </section>
-        <div class="panel-footer"><span class="tiny-logo">◈</span> Made for your moments.</div>
+        <div class="panel-footer">
+          <span class="tiny-logo">◈</span> EClone Games · Made for your moments.
+        </div>
       </aside>
     </main>
     <footer class="app-footer">
-      <span>LUMA PIANO <b>LOCAL STUDIO</b></span
+      <span>ECLONE PIANO <b>BY ECLONE GAMES</b></span
       ><span>연주 데이터는 이 컴퓨터에만 저장됩니다.</span
       ><span id="footerStatus">Waiting for your first note.</span>
     </footer>
@@ -297,7 +297,7 @@
       <button class="dialog-close" data-close="helpDialog" aria-label="닫기">×</button
       ><span class="eyebrow">MAKE THE CONNECTION</span>
       <h2>Kontakt와 연결하기</h2>
-      <p>Keystation → Kontakt → 가상 MIDI 포트 → Luma Piano</p>
+      <p>MIDI 건반 → Kontakt → 가상 MIDI 포트 → EClone Piano</p>
       <ol>
         <li>
           <a
@@ -305,28 +305,29 @@
             target="_blank"
             rel="noreferrer"
             >loopMIDI</a
-          >에서 <strong>Luma Piano</strong> 포트를 만듭니다.
+          >에서 <strong>EClone Piano</strong> 포트를 만듭니다.
         </li>
         <li>
-          Kontakt <strong>Options → MIDI → Outputs</strong>에서 Luma Piano를 <strong>On</strong>으로
-          설정합니다.
+          Kontakt <strong>Options → MIDI → Outputs</strong>에서 EClone Piano를
+          <strong>On</strong>으로 설정합니다.
         </li>
         <li>
           <strong>Engine → Send MIDI to outside world</strong>에서 <strong>Incoming notes</strong>,
           <strong>Incoming CCs</strong>, <strong>GUI keyboard</strong>를 체크합니다.
         </li>
         <li>
-          Kontakt MIDI Inputs의 Luma Piano는 <strong>Off</strong>로 둡니다. Keystation 입력은 그대로
-          유지하세요.
+          Kontakt MIDI Inputs의 EClone Piano는 <strong>Off</strong>로 둡니다. 사용 중인 건반 입력은
+          그대로 유지하세요.
         </li>
         <li>
-          이 화면에서 MIDI 장치를 새로고침하고 <strong>Luma Piano → 연결</strong>을 누른 뒤 건반을
+          이 화면에서 MIDI 장치를 새로고침하고 <strong>EClone Piano → 연결</strong>을 누른 뒤 건반을
           연주합니다.
         </li>
       </ol>
       <p class="dialog-note">
         포트가 안 보이면 Kontakt를 다시 실행하세요. 스크립트 생성 노트는 해당 기능을 쓰는 악기에만
-        추가로 켜 주세요. 화면 건반 테스트만으로는 외장 건반·페달 연결이 모두 검증되지 않습니다.
+        추가로 켜 주세요. 포트 이름은 자유롭게 정할 수 있으며, 기존 연결 이름을 유지해도 됩니다.
+        화면 건반 테스트만으로는 외장 건반·페달 연결이 모두 검증되지 않습니다.
       </p>
       <h3>Kontakt 전용 오디오</h3>
       <p>
@@ -362,7 +363,7 @@
       >
       <p class="dialog-note">
         라이브 소리는 OBS의 「응용 프로그램 오디오 캡처」에서 Kontakt를 선택하세요. 재생 원음은 위
-        옵션으로 브라우저 소스에 넣을 수 있습니다. 원음 중복을 피하려면 한 경로만 켜세요. Luma
+        옵션으로 브라우저 소스에 넣을 수 있습니다. 원음 중복을 피하려면 한 경로만 켜세요. EClone
         Piano는 실행된 상태여야 합니다.
       </p>
       <button class="button outline" id="openStage">소스 화면 미리보기 ↗</button>
@@ -382,7 +383,8 @@
       <span class="eyebrow">RENDER YOUR PERFORMANCE</span>
       <h2 id="exportTitle">영상으로 담는 중</h2>
       <p id="exportDescription">
-        현재 디자인으로 1920 × 1080 영상을 생성합니다. 연주 길이만큼 시간이 걸립니다.
+        현재 디자인으로 1920 × 1080, 60fps 영상을 생성합니다. 컴퓨터 성능에 따라 연주 길이보다 오래
+        걸릴 수 있습니다.
       </p>
       <progress id="exportProgress" max="1" value="0"></progress>
       <p id="exportStatus">준비 중…</p>

@@ -214,7 +214,7 @@ test(
     const { chromium } = await import('@playwright/test');
     const { readFile, access } = await import('node:fs/promises');
     const source = await readFile(new URL('../public/engine.js', import.meta.url), 'utf8');
-    let executablePath = process.env.LUMA_TEST_BROWSER;
+    let executablePath = process.env.ECLONE_TEST_BROWSER || process.env.LUMA_TEST_BROWSER;
     if (!executablePath && process.platform === 'win32') {
       for (const candidate of [
         'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -230,7 +230,7 @@ test(
     const browser = await chromium.launch({ executablePath, headless: true });
     try {
       const page = await browser.newPage();
-      await page.route('http://luma-render.test/**', (route) =>
+      await page.route('http://eclone-render.test/**', (route) =>
         route.fulfill({
           contentType: route.request().url().endsWith('/engine.js')
             ? 'text/javascript'
@@ -240,7 +240,7 @@ test(
             : '<canvas id="piano" width="640" height="360" style="width:640px;height:360px"></canvas>',
         }),
       );
-      await page.goto('http://luma-render.test/');
+      await page.goto('http://eclone-render.test/');
       const result = await page.evaluate(async () => {
         const { PianoRenderer } = await import('/engine.js');
         const canvas = document.getElementById('piano');

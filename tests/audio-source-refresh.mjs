@@ -19,7 +19,9 @@ try {
   server = await startServer({ port: 3228, dataDir });
   browser = await chromium.launch({
     executablePath:
-      process.env.LUMA_TEST_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      process.env.ECLONE_TEST_BROWSER ||
+      process.env.LUMA_TEST_BROWSER ||
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     headless: true,
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
@@ -74,7 +76,7 @@ try {
   await page.goto('http://127.0.0.1:3228');
   await page.waitForFunction(
     () =>
-      window.lumaDiagnostics()?.mode === 'live' &&
+      window.ecloneDiagnostics()?.mode === 'live' &&
       document.getElementById('audioProcess').value === '19592',
   );
 

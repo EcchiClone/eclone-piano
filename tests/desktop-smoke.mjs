@@ -11,8 +11,8 @@ delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: ['.'], cwd: process.cwd(), env, timeout: 30000 });
 try {
   const page = await app.firstWindow();
-  await page.waitForFunction(() => window.lumaDiagnostics?.().mode === 'live');
-  assert.equal(await page.title(), 'Luma Piano — 연주를 빛으로');
+  await page.waitForFunction(() => window.ecloneDiagnostics?.().mode === 'live');
+  assert.equal(await page.title(), 'EClone Piano — 연주를 빛으로');
   const displays = await page.evaluate(() => window.desktop.displays());
   assert.ok(displays.length > 0);
   await page.screenshot({ path: '.runtime/desktop-studio.png' });
@@ -56,7 +56,7 @@ try {
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-public static class LumaOverlayWindowCheck {
+public static class ECloneOverlayWindowCheck {
   [DllImport("user32.dll", EntryPoint="GetWindowLongW")]
   public static extern int GetWindowLong(IntPtr window, int index);
   [DllImport("user32.dll")]
@@ -65,9 +65,9 @@ public static class LumaOverlayWindowCheck {
 '@
 $windowHandle = [IntPtr]::new([Int64]${window.nativeHandle})
 [uint32]$windowOwner = 0
-[void][LumaOverlayWindowCheck]::GetWindowThreadProcessId($windowHandle, [ref]$windowOwner)
+[void][ECloneOverlayWindowCheck]::GetWindowThreadProcessId($windowHandle, [ref]$windowOwner)
 if ($windowOwner -ne ${window.ownerPid}) { throw 'The target HWND is not owned by the isolated Electron test app.' }
-$styles = [LumaOverlayWindowCheck]::GetWindowLong($windowHandle, -20)
+$styles = [ECloneOverlayWindowCheck]::GetWindowLong($windowHandle, -20)
 [pscustomobject]@{ transparent = (($styles -band 0x20) -ne 0); layered = (($styles -band 0x80000) -ne 0); noActivate = (($styles -band 0x8000000) -ne 0); ownerPid = $windowOwner } | ConvertTo-Json -Compress
 `;
     const result = await promisify(execFile)(

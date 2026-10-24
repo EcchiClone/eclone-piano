@@ -53,7 +53,9 @@ try {
   server = await startServer({ port: 3224, dataDir });
   browser = await chromium.launch({
     executablePath:
-      process.env.LUMA_TEST_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      process.env.ECLONE_TEST_BROWSER ||
+      process.env.LUMA_TEST_BROWSER ||
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     headless: true,
     args: ['--autoplay-policy=no-user-gesture-required', '--mute-audio'],
   });
@@ -86,7 +88,7 @@ try {
     window.Audio.prototype = Audio.prototype;
   }, id);
   await page.goto('http://127.0.0.1:3224');
-  await page.waitForFunction(() => window.lumaDiagnostics()?.mode === 'live');
+  await page.waitForFunction(() => window.ecloneDiagnostics()?.mode === 'live');
   await page.locator(`[data-play="${id}"]`).click();
   await page.waitForFunction(
     () =>
@@ -113,13 +115,16 @@ try {
       element.dispatchEvent(new Event('input', { bubbles: true }));
     }, value);
     await page.waitForFunction(
-      ({ key, value }) => window.lumaDiagnostics().settings[key] === value,
+      ({ key, value }) => window.ecloneDiagnostics().settings[key] === value,
       { key, value },
     );
   };
   const theme = async (value) => {
     await page.locator(`[data-theme="${value}"]`).click();
-    await page.waitForFunction((value) => window.lumaDiagnostics().settings.theme === value, value);
+    await page.waitForFunction(
+      (value) => window.ecloneDiagnostics().settings.theme === value,
+      value,
+    );
   };
   await seek(2);
   await page.evaluate(() => {

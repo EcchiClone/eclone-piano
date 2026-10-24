@@ -16,7 +16,7 @@ const originalSpawn = childProcess.spawn;
 const originalExists = fs.existsSync;
 const recordings = new Set();
 const children = new Set();
-const testDirectory = await fsp.mkdtemp(path.join(tmpdir(), 'luma-server-audio-'));
+const testDirectory = await fsp.mkdtemp(path.join(tmpdir(), 'eclone-server-audio-'));
 let behavior = {};
 let recorder;
 let midiBridge;

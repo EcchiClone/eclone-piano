@@ -1,5 +1,5 @@
 /**
- * Luma piano performance and Canvas renderer. All time values are seconds.
+ * EClone Piano performance and Canvas renderer. All time values are seconds.
  * Performance.notes use MIDI velocity (1–127), zero-based channels and Infinity
  * for a sounding note. `release` is physical key-up, `end` includes sustain.
  */

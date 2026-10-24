@@ -75,7 +75,7 @@ else {
       backend = await mod.startServer({ onOverlay: toggleOverlay });
     } catch (e) {
       dialog.showErrorBox(
-        'Luma Piano 실행 실패',
+        'EClone Piano 실행 실패',
         e.message + '\n이미 실행 중인 서버가 있다면 종료한 후 다시 시작하세요.',
       );
       app.quit();
@@ -87,7 +87,7 @@ else {
       minWidth: 1000,
       minHeight: 720,
       backgroundColor: '#0a1016',
-      title: 'Luma Piano',
+      title: 'EClone Piano',
       autoHideMenuBar: true,
       webPreferences: {
         preload: path.join(__dirname, 'preload.cjs'),

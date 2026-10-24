@@ -7,8 +7,8 @@ await fs.mkdir(runtime, { recursive: true });
 const dataDir = await fs.mkdtemp(path.join(runtime, 'ui-data-'));
 const server = await startServer({ port: 3221, dataDir });
 try {
-  process.env.LUMA_TEST_URL = 'http://127.0.0.1:3221';
-  process.env.LUMA_UI_ISOLATED = '1';
+  process.env.ECLONE_TEST_URL = 'http://127.0.0.1:3221';
+  process.env.ECLONE_UI_ISOLATED = '1';
   await import('./ui-smoke.mjs');
 } finally {
   await server.close();
@@ -17,4 +17,5 @@ try {
 }
 await import('./playback-settings.mjs');
 await import('./playback-clock.mjs');
+await import('./playback-owner.mjs');
 await import('./audio-source-refresh.mjs');

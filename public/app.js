@@ -7,6 +7,7 @@ if (viewer) document.body.classList.add('viewer');
 const live = new Performance({ notePolicy: 'piano' }),
   cache = new Map();
 let socket,
+  socketClientId = null,
   state = null,
   offset = 0,
   currentSession = null,
@@ -46,6 +47,7 @@ const send = (msg) => {
     msg = { ...msg, position: Number.isFinite(msg.position) ? msg.position : position() };
     audioWantedPlaying = false;
     audio.pause();
+    updateUI();
   }
   if (socket?.readyState === 1) socket.send(JSON.stringify(msg));
   else toast('서버 연결을 기다려 주세요.', 'error');
@@ -67,10 +69,18 @@ function transportPosition() {
 }
 function usesAudioClock() {
   return !!(
+    canPlayAudio() &&
     audio &&
     audioSession === state?.transport.sessionId &&
     currentSession?.hasAudio &&
     state.transport.mode !== 'live'
+  );
+}
+function canPlayAudio() {
+  return (
+    socket?.readyState === 1 &&
+    !!socketClientId &&
+    (viewer ? params.get('audio') === '1' : state?.studioAudioOwnerId === socketClientId)
   );
 }
 function position() {
@@ -149,7 +159,7 @@ async function syncSession(initialPosition) {
     if (request !== sessionLoad) return;
     currentSession = session;
     replay = Performance.fromJSON(session);
-    if (session.hasAudio && (!viewer || params.get('audio') === '1')) {
+    if (session.hasAudio && canPlayAudio()) {
       if (audioSession !== id) {
         stopAudio();
         audio = new Audio('/media/' + id + '.wav');
@@ -255,10 +265,14 @@ function connectSocket() {
       return;
     }
     if (msg.type === 'hello' || msg.type === 'state') {
+      const audioAllowedBefore = canPlayAudio();
       const oldTransport = state?.transport;
       const oldId = oldTransport?.sessionId;
       const transportChanged = changedTransport(oldTransport, msg.transport);
+      if (msg.type === 'hello') socketClientId = msg.clientId;
       state = msg;
+      const audioPermissionChanged = audioAllowedBefore !== canPlayAudio();
+      if (!canPlayAudio()) stopAudio();
       if (state.starting || state.recording || state.stopping) recordPreparing = false;
       offset = msg.serverTime - performance.now() / 1000;
       count = msg.midiCount;
@@ -266,7 +280,7 @@ function connectSocket() {
         live.reset();
         for (const e of msg.history || []) live.ingest(e);
       }
-      if (oldId !== msg.transport.sessionId || msg.type === 'hello')
+      if (oldId !== msg.transport.sessionId || msg.type === 'hello' || audioPermissionChanged)
         syncSession(msg.type === 'hello' ? transportPosition() : msg.transport.position);
       else syncAudio(transportChanged);
       updateUI();
@@ -324,6 +338,8 @@ function connectSocket() {
     }
   };
   socket.onclose = () => {
+    socketClientId = null;
+    stopAudio();
     recordPreparing = false;
     updateUI();
     if (!viewer) {
@@ -360,7 +376,11 @@ function updateUI() {
     : demoMode
       ? '데모 시각화 · 실제 입력이 아닙니다'
       : currentSession?.hasAudio
-        ? '원음 WAV와 함께 재생'
+        ? state.studioAudioOwnerId && !canPlayAudio()
+          ? '다른 스튜디오 창에서 원음 재생 · 이 창은 화면만 표시'
+          : canPlayAudio()
+            ? '이 창에서 원음 WAV와 함께 재생'
+            : '재생을 누르면 이 창에서 원음 출력'
         : 'MIDI 시각화 · 원음 없음';
   $('seek').disabled = liveMode;
   $('seek').max = currentSession?.duration || 1;
@@ -409,7 +429,7 @@ function updateUI() {
       ? state.ports.inputs.map((p) => `<option value="${p.id}">${escape(p.name)}</option>`).join('')
       : '<option value="">MIDI 장치 없음</option>';
     $('midiInput').dataset.signature = signature;
-    const preferred = state.ports.inputs.find((p) => /luma|loopmidi/i.test(p.name));
+    const preferred = state.ports.inputs.find((p) => /eclone|luma|loopmidi/i.test(p.name));
     if (preferred) $('midiInput').value = preferred.id;
     else if (state.ports.inputs.some((p) => String(p.id) === previous))
       $('midiInput').value = previous;
@@ -595,7 +615,7 @@ async function exportVideo(id) {
     document.body.appendChild(canvas);
     exportRenderer = new PianoRenderer(canvas, () => options);
     const { encodeCanvasFrames } = await import('./offline-video.js');
-    window.lumaExportDiagnostics = await encodeCanvasFrames({
+    window.ecloneExportDiagnostics = window.lumaExportDiagnostics = await encodeCanvasFrames({
       canvas,
       duration: take.duration,
       signal: abort.signal,
@@ -608,7 +628,7 @@ async function exportVideo(id) {
           'X-Export-Sequence': String(sequence++),
         }),
       onProgress: (report) => {
-        window.lumaExportDiagnostics = report;
+        window.ecloneExportDiagnostics = window.lumaExportDiagnostics = report;
         $('exportProgress').value = report.renderedFrames / report.totalFrames;
         $('exportStatus').textContent =
           `${report.renderedFrames.toLocaleString()} / ${report.totalFrames.toLocaleString()} 프레임 · 1080p · 60fps`;
@@ -877,13 +897,16 @@ window.addEventListener('beforeunload', () => {
   socket?.close();
 });
 // Read-only diagnostics support repeatable rendering and connection checks.
-window.lumaDiagnostics = () => ({
+window.ecloneDiagnostics = () => ({
   mode: state?.transport.mode,
   connected: state?.midiStatus.connected,
   midiCount: count,
   notes: live.notes.length,
   position: position(),
   session: currentSession?.id,
+  studioAudioOwnerId: state?.studioAudioOwnerId,
+  ownsStudioAudio: !viewer && canPlayAudio(),
   recording: !!state?.recording,
   settings: state?.settings,
 });
+window.lumaDiagnostics = window.ecloneDiagnostics;

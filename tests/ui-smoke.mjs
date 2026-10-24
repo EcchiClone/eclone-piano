@@ -2,13 +2,15 @@ import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
-if (process.env.LUMA_UI_ISOLATED !== '1' || !process.env.LUMA_TEST_URL)
+if (process.env.ECLONE_UI_ISOLATED !== '1' || !process.env.ECLONE_TEST_URL)
   throw new Error(
     'Run npm run test:ui so fixture imports/deletion use an isolated data directory.',
   );
-const base = process.env.LUMA_TEST_URL;
+const base = process.env.ECLONE_TEST_URL;
 const executablePath =
-  process.env.LUMA_TEST_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  process.env.ECLONE_TEST_BROWSER ||
+  process.env.LUMA_TEST_BROWSER ||
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 await fs.mkdir('.runtime', { recursive: true });
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({
@@ -26,11 +28,11 @@ async function capture(name, options = {}) {
   report.screenshots.push(path);
 }
 async function diagnostics() {
-  return page.evaluate(() => window.lumaDiagnostics());
+  return page.evaluate(() => window.ecloneDiagnostics());
 }
 async function waitSettings(key, value) {
   await page.waitForFunction(
-    ({ key, value }) => window.lumaDiagnostics()?.settings?.[key] === value,
+    ({ key, value }) => window.ecloneDiagnostics()?.settings?.[key] === value,
     { key, value },
   );
 }
@@ -57,7 +59,7 @@ async function seekTo(t) {
     element.dispatchEvent(new Event('input', { bubbles: true }));
   }, t);
   await page.waitForFunction(
-    (value) => Math.abs(window.lumaDiagnostics().position - value) < 0.1,
+    (value) => Math.abs(window.ecloneDiagnostics().position - value) < 0.1,
     t,
   );
 }
@@ -86,7 +88,7 @@ try {
     '보존할 두 번째 연주 · 긴 제목의 반응형 목록 검증 '.repeat(5),
   );
   await page.goto(base);
-  await page.waitForFunction(() => window.lumaDiagnostics()?.mode);
+  await page.waitForFunction(() => window.ecloneDiagnostics()?.mode);
   await page.locator(`[data-delete="${deletingFixture.id}"]`).waitFor();
   assert.equal(await page.locator('#sessionList .session-card').count(), 2);
   assert.equal(
@@ -96,12 +98,13 @@ try {
   );
   originalSettings = (await diagnostics()).settings;
   await page.locator('#returnLive').click();
-  await page.waitForFunction(() => window.lumaDiagnostics().mode === 'live');
+  await page.waitForFunction(() => window.ecloneDiagnostics().mode === 'live');
   await capture('studio-live-1920');
   report.layouts.push({ name: 'desktop-1920', ...(await overflow()) });
   await page.locator('#demoButton').click();
   await page.waitForFunction(
-    () => window.lumaDiagnostics().mode === 'demo' && window.lumaDiagnostics().session === 'demo',
+    () =>
+      window.ecloneDiagnostics().mode === 'demo' && window.ecloneDiagnostics().session === 'demo',
   );
   await page.locator('#playButton').click();
   await seekTo(5);
@@ -133,7 +136,7 @@ try {
   });
   stage.on('pageerror', (error) => errors.push(error.message));
   await stage.goto(base + '/stage?transparent=1');
-  await stage.waitForFunction(() => window.lumaDiagnostics()?.session === 'demo');
+  await stage.waitForFunction(() => window.ecloneDiagnostics()?.session === 'demo');
   report.stage = await stage.evaluate(() => {
     const canvas = document.querySelector('canvas');
     return {
@@ -164,7 +167,7 @@ try {
   report.screenshots.push('.runtime/stage-transparent-1920.png');
   const desktopOverlay = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   await desktopOverlay.goto(base + '/stage?transparent=1&overlay=1');
-  await desktopOverlay.waitForFunction(() => window.lumaDiagnostics()?.session === 'demo');
+  await desktopOverlay.waitForFunction(() => window.ecloneDiagnostics()?.session === 'demo');
   await desktopOverlay.bringToFront();
   await desktopOverlay.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
@@ -180,7 +183,7 @@ try {
     const canvas = document.querySelector('canvas'),
       ctx = canvas.getContext('2d');
     return {
-      settings: window.lumaDiagnostics().settings,
+      settings: window.ecloneDiagnostics().settings,
       dimensions: [canvas.width, canvas.height],
       samples: [900, 950, 1000, 1030, 1060, 1070].map((y) => ({
         x: 500,
@@ -214,7 +217,7 @@ try {
       throw new Error(
         JSON.stringify(
           await desktopOverlay.evaluate(() => ({
-            settings: window.lumaDiagnostics().settings,
+            settings: window.ecloneDiagnostics().settings,
             alpha: document.querySelector('canvas').getContext('2d').getImageData(500, 1070, 1, 1)
               .data[3],
           })),
@@ -275,7 +278,8 @@ try {
 
   await page.locator(`[data-play="${deletingFixture.id}"]`).click();
   await page.waitForFunction(
-    (id) => window.lumaDiagnostics().mode === 'replay' && window.lumaDiagnostics().session === id,
+    (id) =>
+      window.ecloneDiagnostics().mode === 'replay' && window.ecloneDiagnostics().session === id,
     deletingFixture.id,
   );
   await page.locator(`[data-delete="${deletingFixture.id}"]`).click();
@@ -289,7 +293,8 @@ try {
   assert.equal(deletion.status(), 200);
   assert.deepEqual(await deletion.json(), { deleted: true, id: deletingFixture.id, trashed: true });
   await page.waitForFunction(
-    () => !document.getElementById('deleteDialog').open && window.lumaDiagnostics().mode === 'live',
+    () =>
+      !document.getElementById('deleteDialog').open && window.ecloneDiagnostics().mode === 'live',
   );
   await page.locator(`[data-delete="${deletingFixture.id}"]`).waitFor({ state: 'detached' });
   assert.equal(await page.locator(`[data-delete="${retainedFixture.id}"]`).count(), 1);

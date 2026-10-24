@@ -9,7 +9,9 @@ export async function encodeCanvasFrames({
   onProgress,
 }) {
   if (typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined')
-    throw new Error('프레임 단위 영상 생성에는 최신 Chrome 또는 Luma 데스크톱 앱이 필요합니다.');
+    throw new Error(
+      '프레임 단위 영상 생성에는 최신 Chrome 또는 EClone Piano 데스크톱 앱이 필요합니다.',
+    );
   const fps = 60,
     totalFrames = Math.ceil(duration * fps);
   let config;
@@ -31,7 +33,7 @@ export async function encodeCanvasFrames({
   }
   if (!config)
     throw new Error(
-      '이 환경에서 1080p60 H.264 인코더를 사용할 수 없습니다. Luma 데스크톱 앱에서 다시 시도하세요.',
+      '이 환경에서 1080p60 H.264 인코더를 사용할 수 없습니다. EClone Piano 데스크톱 앱에서 다시 시도하세요.',
     );
   const report = {
     method: 'offline',
