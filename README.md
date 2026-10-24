@@ -69,19 +69,21 @@ WAV는 48 kHz stereo / 16-bit PCM입니다. MIDI는 표준 `.mid`로도 내려�
 
 ## 디자인
 
-Aurora / Golden / Violet 테마, 파티클, 글로우, 화면에 보이는 시간, 전체 88건반 / 중앙 37건반, 음 이름, 건반 숨김, 투명 배경을 제공합니다. 데모는 디자인 확인용 무음 연주이며 실제 MIDI 연결과 구분해 표시합니다.
+Aurora / Golden / Violet 테마, 파티클, 글로우, 화면에 보이는 시간, 88 / 61 / 49 / 37건반 범위, 음 이름, 건반 숨김, 투명 배경을 제공합니다. Keystation 49에 맞는 범위를 선택할 수 있으며 음 이름은 MIDI 60 = C4 기준입니다. 데모는 디자인 확인용 무음 연주이며 실제 MIDI 연결과 구분해 표시합니다.
 
 ## 검증과 개발
 
 ```powershell
 npm test
 npm run check
+npm run test:ui
+npm run test:export
 node native/test-bridge.mjs
 dotnet native-audio/bin/Release/net9.0-windows/ProcessAudio.dll --self-test
 node native-audio/smoke-test.mjs
 ```
 
-실행된 서버에서 `node tests/ui-smoke.mjs`는 Chrome headless로 디자인·투명 소스·반응형 화면을 확인하고 `.runtime/`에 스크린샷을 저장합니다. 이 테스트는 잠시 공유 디자인과 재생 위치를 변경한 뒤 복원하므로 방송 중에는 실행하지 마세요. 데스크톱 앱의 자체 테스트는 사용자 앱을 조작하지 않습니다.
+`npm run test:ui`와 `npm run test:export`는 별도 로컬 서버와 임시 데이터 폴더를 사용합니다. 실행 중인 스튜디오의 녹음과 디자인을 바꾸지 않고 Chrome headless로 화면과 영상·오디오 파일을 검증합니다. `.runtime/`에 스크린샷과 검사 결과를 보관합니다. `npm run test:desktop`은 스튜디오가 종료된 상태에서 앱 자체와 투명 오버레이를 실행해 검사합니다. Kontakt나 다른 사용자 앱은 조작하지 않습니다.
 
 구성: `public/` 스튜디오·렌더러, `server/` 로컬 서버·세션, `desktop/` Electron 오버레이, `native/` WinMM MIDI, `native-audio/` 프로세스 오디오 캡처. 자세한 네이티브 프로토콜과 제한은 각 폴더 README를 참고하세요.
 

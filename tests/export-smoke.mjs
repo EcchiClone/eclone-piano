@@ -13,7 +13,8 @@ import { startServer } from '../server/index.js';
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const id = 'export-smoke-' + randomUUID();
-const recordingRoot = path.join(root, 'recordings');
+await fs.mkdir(path.join(root, '.runtime'), { recursive: true });
+const recordingRoot = await fs.mkdtemp(path.join(root, '.runtime', 'export-data-'));
 const prefix = path.join(recordingRoot, id);
 const duration = 2.4;
 const onset = 0.35;
@@ -75,7 +76,7 @@ try {
     }),
   );
   const port = Number(process.env.LUMA_EXPORT_TEST_PORT || 3219);
-  server = await startServer({ port });
+  server = await startServer({ port, dataDir: recordingRoot });
   const base = `http://127.0.0.1:${port}`;
   const post = async (route, body, headers = {}) =>
     fetch(base + route, { method: 'POST', body, headers });
@@ -290,4 +291,7 @@ try {
     if (filename.startsWith(id + '.') || filename.startsWith(id + '-'))
       await fs.unlink(path.join(recordingRoot, filename)).catch(() => {});
   }
+  if (!recordingRoot.startsWith(path.join(root, '.runtime') + path.sep + 'export-data-'))
+    throw new Error('Unsafe export test path');
+  await fs.rm(recordingRoot, { recursive: true, force: true });
 }

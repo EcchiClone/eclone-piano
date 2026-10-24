@@ -537,6 +537,8 @@ async function exportVideo(id) {
     $('exportStatus').textContent = '1920 × 1080 · ' + result.format.toUpperCase();
     $('exportProgress').value = 1;
     $('exportDownload').href = result.url;
+    $('exportDownload').download =
+      `${take.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 100)}-${options.theme}.${result.format}`;
     $('exportDownload').hidden = false;
     $('cancelExport').textContent = '닫기';
     $('cancelExport').hidden = false;
