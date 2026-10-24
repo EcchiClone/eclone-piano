@@ -586,6 +586,42 @@ test(
   },
 );
 
+test('import rejects incomplete or overlong channel messages and accepts exact C0/D0 lengths', async () => {
+  const s = await setup();
+  try {
+    const importEvents = (events) =>
+      fetch(`http://127.0.0.1:${s.port}/api/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration: 1, events }),
+      });
+    for (const status of [0x8b, 0x9b, 0xab, 0xbb, 0xcb, 0xdb, 0xeb]) {
+      const length = (status & 0xe0) === 0xc0 ? 2 : 3;
+      for (const wrongLength of [length - 1, length + 1]) {
+        const data = [status, ...Array(wrongLength - 1).fill(60)];
+        const response = await importEvents([{ t: 0, data }]);
+        assert.equal(response.status, 400, `Malformed MIDI accepted: ${data}`);
+        assert.match((await response.json()).error, /올바르지 않은 MIDI 이벤트/);
+      }
+    }
+    assert.equal(
+      (await fs.readdir(s.dataDir)).filter((name) => name.endsWith('.session.json')).length,
+      0,
+    );
+    const events = [
+      { t: 0, data: [0xcb, 12] },
+      { t: 0.1, data: [0xdb, 90] },
+      { t: 0.2, data: [0x9b, 60, 100] },
+      { t: 0.8, data: [0x8b, 60, 0] },
+    ];
+    const valid = await importEvents(events);
+    assert.equal(valid.status, 200);
+    assert.deepEqual((await valid.json()).events, events);
+  } finally {
+    await s.close();
+  }
+});
+
 test('rapid slider changes persist a complete final settings document', async () => {
   const s = await setup();
   try {

@@ -116,6 +116,10 @@ childProcess.spawn = (command, args) => {
           clockResets: 2,
           timestampErrors: 1,
           maxClockDriftMs: 3.25,
+          frameCounterMode: 'packet-count',
+          unavailablePositionPackets: 14,
+          rejectedClockAnchors: 0,
+          clockMap: current.clockMap,
         });
       }
       child.finish(current.finalize === false ? 1 : 0);
@@ -229,10 +233,60 @@ test('native level and finalized events retain the browser protocol event names'
       clockResets: 2,
       timestampErrors: 1,
       maxClockDriftMs: 3.25,
+      frameCounterMode: 'packet-count',
+      unavailablePositionPackets: 14,
+      rejectedClockAnchors: 0,
     })) {
       assert.equal(saved.session.audio[key], value);
       assert.equal(stored.audio[key], value);
     }
+  } finally {
+    await client.close();
+  }
+});
+
+test('saved MIDI follows the WAV clock while retaining original capture timestamps', async () => {
+  const client = await connect();
+  try {
+    behavior = {
+      clockMap: {
+        version: 1,
+        sampleRate: 48000,
+        anchors: [
+          { wallTime: 0, frame: 0 },
+          { wallTime: 0.1001, frame: 4800 },
+        ],
+      },
+    };
+    client.send({ type: 'record', withAudio: true, pid: 123, name: 'Clock-mapped take' });
+    await client.wait((message) => message.type === 'state' && message.recording);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    midiBridge.message({ type: 'midi', data: [144, 60, 100] });
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    midiBridge.message({ type: 'midi', data: [128, 60, 0] });
+    client.send({ type: 'stopRecord' });
+    const { session } = await client.wait((message) => message.type === 'saved');
+    assert.equal(session.eventTimebase, 'audio-pcm');
+    assert.equal(session.midiClockMapping.target, 'audio-pcm');
+    assert.equal(session.audio.clockMap.anchors.length, 2);
+    const notes = session.events.filter((event) => event.data[1] === 60);
+    assert.equal(notes.length, 2);
+    for (const event of notes) {
+      assert.ok(Number.isFinite(event.wallTime));
+      assert.equal(event.t, Math.min(4800, Math.round((event.wallTime / 0.1001) * 4800)) / 48000);
+    }
+    assert.deepEqual(
+      notes.map((event) => event.data),
+      [
+        [144, 60, 100],
+        [128, 60, 0],
+      ],
+    );
+    const stored = JSON.parse(
+      await fsp.readFile(path.join(client.dataDir, session.id + '.session.json'), 'utf8'),
+    );
+    assert.deepEqual(stored.events, session.events);
+    assert.deepEqual(stored.audio.clockMap, session.audio.clockMap);
   } finally {
     await client.close();
   }

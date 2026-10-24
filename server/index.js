@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { encodeMidi } from './midi-file.js';
+import { mapMidiEventsToAudio } from './audio-clock.js';
 import { Performance as MidiPerformance } from '../public/engine.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -770,6 +771,9 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
             ? run?.error?.message ||
               '오디오 파일이 완전히 저장되지 않았습니다. MIDI 연주는 저장했습니다.'
             : undefined;
+        const synchronized = wave
+          ? mapMidiEventsToAudio(rec.events, run.final.clockMap, wave)
+          : { events: rec.events };
         const saved = {
           version: 1,
           notePolicy: livePerformance.notePolicy,
@@ -779,6 +783,8 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
           duration: Math.max(midiDuration, wave?.duration || 0),
           hasAudio: !!wave,
           audioError,
+          eventTimebase: synchronized.mapping ? 'audio-pcm' : 'capture-clock',
+          midiClockMapping: synchronized.mapping,
           audio: wave
             ? {
                 ...wave,
@@ -789,9 +795,13 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
                 clockResets: run.final.clockResets,
                 timestampErrors: run.final.timestampErrors,
                 maxClockDriftMs: run.final.maxClockDriftMs,
+                frameCounterMode: run.final.frameCounterMode,
+                unavailablePositionPackets: run.final.unavailablePositionPackets,
+                rejectedClockAnchors: run.final.rejectedClockAnchors,
+                clockMap: synchronized.clockMap,
               }
             : undefined,
-          events: rec.events,
+          events: synchronized.events,
           settings: savedSettings,
         };
         await fs.writeFile(path.join(DATA, rec.id + '.session.json'), JSON.stringify(saved));
@@ -963,6 +973,12 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
   }, 60000);
   expireExports.unref();
   const server = http.createServer(async (req, res) => {
+    let releaseMedia;
+    const releaseMediaLease = () => {
+      const release = releaseMedia;
+      releaseMedia = null;
+      release?.();
+    };
     const json = (obj, status = 200) => {
       res.writeHead(status, {
         'Content-Type': 'application/json; charset=utf-8',
@@ -1029,8 +1045,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
               e.t >= 0 &&
               e.t <= src.duration + 1 &&
               Array.isArray(e.data) &&
-              e.data.length >= 2 &&
-              e.data.length <= 3 &&
+              e.data.length === ((e.data[0] & 0xe0) === 0xc0 ? 2 : 3) &&
               e.data.every((n, i) => Number.isInteger(n) && n >= 0 && n <= (i ? 127 : 239)) &&
               e.data[0] >= 128,
           )
@@ -1205,24 +1220,34 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         if (!/^[\w-]+\.(wav|mp4|webm|session\.json)$/.test(p.slice(7)))
           throw new Error('잘못된 파일 경로');
         file = path.join(DATA, p.slice(7));
+        const take = /^([\w-]+)\.(?:wav|session\.json)$/.exec(p.slice(7));
+        if (take) releaseMedia = retainSession(take[1]);
       } else {
         file = path.resolve(ROOT, 'public', p === '/' || p === '/stage' ? 'index.html' : '.' + p);
         if (!file.startsWith(path.join(ROOT, 'public') + path.sep))
           throw new Error('잘못된 파일 경로');
       }
+      let reader;
+      res.once('close', () => {
+        if (reader) reader.destroy();
+        else releaseMediaLease();
+      });
       const stat = await fs.stat(file);
+      if (res.destroyed) return releaseMediaLease();
       let start = 0,
         end = stat.size - 1,
         status = 200;
       if (req.headers.range) {
         const match = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range);
         if (!match) {
+          releaseMediaLease();
           res.writeHead(416);
           return res.end();
         }
         start = +match[1];
         end = match[2] ? Math.min(+match[2], end) : end;
         if (start > end || start >= stat.size) {
+          releaseMediaLease();
           res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` });
           return res.end();
         }
@@ -1236,9 +1261,16 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         'X-Content-Type-Options': 'nosniff',
         ...(status === 206 ? { 'Content-Range': `bytes ${start}-${end}/${stat.size}` } : {}),
       });
-      if (req.method === 'HEAD') return res.end();
-      createReadStream(file, { start, end }).pipe(res);
+      if (req.method === 'HEAD') {
+        releaseMediaLease();
+        return res.end();
+      }
+      reader = createReadStream(file, { start, end });
+      reader.once('close', releaseMediaLease);
+      reader.once('error', () => res.destroy());
+      reader.pipe(res);
     } catch (e) {
+      releaseMediaLease();
       json(
         { error: e.code === 'ENOENT' ? '파일을 찾지 못했습니다.' : e.message },
         e.code === 'ENOENT' ? 404 : [409, 500].includes(e.statusCode) ? e.statusCode : 400,

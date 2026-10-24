@@ -15,3 +15,4 @@ try {
   if (!dataDir.startsWith(runtime + path.sep + 'ui-data-')) throw new Error('Unsafe test path');
   await fs.rm(dataDir, { recursive: true, force: true });
 }
+await import('./playback-settings.mjs');

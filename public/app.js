@@ -709,7 +709,7 @@ if (!viewer) {
       pendingDelete = null;
       $('deleteDialog').close();
       await loadLibrary();
-      toast('연주와 원음을 휴지통으로 옮겼습니다. 내보낸 영상은 유지됩니다.');
+      toast('연주와 원음을 앱 휴지통으로 옮겼습니다. 내보낸 영상은 유지됩니다.');
     } catch (error) {
       toast(error.message, 'error');
     } finally {

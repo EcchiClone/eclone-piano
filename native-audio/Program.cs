@@ -83,12 +83,14 @@ internal sealed class ProcessLoopback : IDisposable
     private readonly uint pid;
     private readonly string path;
     private long startedTicks;
+    private PacketTimeline? timeline;
     private double maxPeak;
     private double peak;
     private double squareSum;
     private long samples;
     private int discontinuities;
     private bool warnedSilence;
+    private readonly List<object> packetDiagnostics = new();
     private byte[] buffer = new byte[48000];
 
     internal ProcessLoopback(uint pid, string path)
@@ -143,6 +145,7 @@ internal sealed class ProcessLoopback : IDisposable
     internal void Run(WaitHandle stop, Process target, double limitSeconds)
     {
         startedTicks = Stopwatch.GetTimestamp();
+        timeline = new PacketTimeline(SampleRate, startedTicks / (double)Stopwatch.Frequency);
         long startedUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         Check(audioClient!.Start(), "Start audio capture");
         started = true;
@@ -188,7 +191,13 @@ internal sealed class ProcessLoopback : IDisposable
         writer.PadToFrame((long)Math.Round(duration * SampleRate));
         writer.Checkpoint();
         Program.Emit(new { type = "stopped", path, reason, frames = writer.Frames,
-            durationMs = writer.Frames * 1000d / SampleRate, peak = maxPeak, silent = maxPeak < 0.0001, discontinuities });
+            durationMs = writer.Frames * 1000d / SampleRate, peak = maxPeak, silent = maxPeak < 0.0001, discontinuities,
+            insertedGapFrames = timeline.InsertedGapFrames, clockResets = timeline.PositionResets,
+            timestampErrors = timeline.TimestampErrors, maxClockDriftMs = timeline.MaxQpcDriftFrames * 1000d / SampleRate,
+            frameCounterMode = timeline.FrameCounterMode, unavailablePositionPackets = timeline.UnavailablePositionPackets,
+            rejectedClockAnchors = timeline.RejectedClockAnchors,
+            clockMap = new { version = 1, sampleRate = SampleRate, anchors = timeline.GetClockAnchors() },
+            packetDiagnostics });
     }
 
     private double ElapsedSeconds => (Stopwatch.GetTimestamp() - startedTicks) / (double)Stopwatch.Frequency;
@@ -199,7 +208,7 @@ internal sealed class ProcessLoopback : IDisposable
         {
             Check(captureClient!.GetNextPacketSize(out var available), "Read capture packet size");
             if (available == 0) return;
-            Check(captureClient.GetBuffer(out var data, out var frames, out var flags, out _, out var qpc), "Read capture packet");
+            Check(captureClient.GetBuffer(out var data, out var frames, out var flags, out var devicePosition, out var qpc), "Read capture packet");
             if (frames == 0) return;
             try
             {
@@ -208,14 +217,11 @@ internal sealed class ProcessLoopback : IDisposable
                 if ((flags & 2) != 0 || data == IntPtr.Zero) Array.Clear(buffer, 0, byteCount);
                 else Marshal.Copy(data, buffer, 0, byteCount);
                 if ((flags & 1) != 0) discontinuities++;
-                // QPC timestamps are in 100 ns units; align gaps without shortening silent periods.
-                // A tiny timestamp jitter must not add samples at every packet boundary.
-                long offset = writer.Frames;
-                if ((flags & 4) == 0 && qpc != 0)
-                {
-                    var packetFrame = (long)Math.Round((qpc / 10_000_000d - startedTicks / (double)Stopwatch.Frequency) * SampleRate);
-                    if (Math.Abs(packetFrame - writer.Frames) > SampleRate / 200) offset = packetFrame;
-                }
+                // Keep contiguous audio intact even when QPC and audio clocks drift.
+                // Only device-frame gaps indicate missing samples after the initial anchor.
+                long offset = timeline!.GetOffset(frames, flags, devicePosition, qpc, writer.Frames);
+                if (packetDiagnostics.Count < 8)
+                    packetDiagnostics.Add(new { frames, flags, devicePosition, qpc, writtenFrame = writer.Frames, offset });
                 var skippedFrames = (int)Math.Min(frames, Math.Max(0, writer.Frames - offset));
                 if (offset > writer.Frames) writer.PadToFrame(offset);
                 for (var i = skippedFrames * 4; i < byteCount; i += 2)
@@ -314,10 +320,72 @@ internal static class SelfTest
             if (bytes.Length != 19244 || BitConverter.ToUInt32(bytes, 4) != 19236 || BitConverter.ToUInt32(bytes, 40) != 19200 ||
                 BitConverter.ToUInt32(bytes, 24) != 48000 || bytes[44 + 2400 * 4] != 255 || bytes[44 + 2400 * 4 + 3] != 128)
                 throw new Exception("WAV header, duration, or PCM sample test failed.");
-            Program.Emit(new { type = "self-test", passed = true, frames = 4800, bytes = bytes.Length });
+            TestPacketTimeline();
+            Program.Emit(new { type = "self-test", passed = true, frames = 4800, bytes = bytes.Length,
+                tests = new[] { "wave-header", "pcm-samples", "qpc-clock-drift", "device-frame-gap", "timestamp-recovery", "device-clock-reset", "initial-frame-anchor", "unavailable-device-counter", "bounded-clock-map" } });
             return 0;
         }
         finally { File.Delete(path); }
+    }
+
+    private static void TestPacketTimeline()
+    {
+        const ulong startQpc = 10_000_000_000;
+        const uint packetFrames = 480;
+        var timeline = new PacketTimeline(48000, startQpc / 10_000_000d);
+        long written = 0;
+        // 20s of contiguous PCM with 0.1% QPC drift used to inject 241 zeros
+        // about every 5s. It must now remain exactly contiguous after its anchor.
+        for (uint packet = 0; packet < 2000; packet++)
+        {
+            ulong qpc = startQpc + 50_000 + packet * 100_100UL;
+            long offset = timeline.GetOffset(packetFrames, 0, packet * (ulong)packetFrames, qpc, written);
+            long expected = 240 + packet * packetFrames;
+            if (offset != expected) throw new Exception($"Clock drift inserted or dropped PCM at packet {packet}.");
+            written = offset + packetFrames;
+        }
+        if (written != 960240 || timeline.InsertedGapFrames != 0 || timeline.MaxQpcDriftFrames < 900)
+            throw new Exception("Continuous audio clock-drift regression failed.");
+
+        var gaps = new PacketTimeline(48000, startQpc / 10_000_000d);
+        if (gaps.GetOffset(480, 0, 0, startQpc, 0) != 0 ||
+            gaps.GetOffset(480, 0, 480, startQpc + 100_000, 480) != 480 ||
+            gaps.GetOffset(480, 1, 1440, startQpc + 300_000, 960) != 1440 ||
+            gaps.InsertedGapFrames != 480)
+            throw new Exception("Actual device-frame gaps were not preserved.");
+        if (gaps.GetOffset(480, 4, 999999, 0, 1920) != 1920 ||
+            gaps.GetOffset(480, 0, 2400, startQpc + 600_000, 2400) != 2400 ||
+            gaps.TimestampErrors != 1)
+            throw new Exception("Invalid timestamps must not drop valid PCM.");
+        if (gaps.GetOffset(480, 1, 0, startQpc + 700_000, 2880) != 2880 || gaps.PositionResets != 1)
+            throw new Exception("Device clock reset must re-anchor without cutting audio.");
+
+        var anchor = new PacketTimeline(48000, startQpc / 10_000_000d);
+        // A buffer may begin slightly before Start's wall-clock anchor, and the
+        // device counter need not begin at zero. Only pre-session frames trim.
+        if (anchor.GetOffset(480, 0, 10000, startQpc - 50_000, 0) != -240 ||
+            anchor.GetOffset(480, 0, 10480, startQpc + 50_000, 240) != 240 ||
+            anchor.InsertedGapFrames != 0)
+            throw new Exception("Initial frame anchor did not preserve a non-zero device origin.");
+
+        var unavailable = new PacketTimeline(48000, startQpc / 10_000_000d);
+        for (uint packet = 0; packet < 1000; packet++)
+        {
+            long offset = unavailable.GetOffset(336, 0, 0, startQpc + packet * 70_068UL, packet * 336);
+            if (offset != packet * 336) throw new Exception("Unavailable device counter interrupted contiguous PCM.");
+        }
+        var anchors = unavailable.GetClockAnchors();
+        if (unavailable.PositionResets != 0 || unavailable.UnavailablePositionPackets != 999 ||
+            unavailable.FrameCounterMode != "packet-count" || unavailable.InsertedGapFrames != 0 ||
+            anchors.Length < 10 || anchors[0].frame != 0 || anchors[^1].frame != 999 * 336 ||
+            unavailable.MaxQpcDriftFrames < 300)
+            throw new Exception("Unavailable frame counter or QPC-to-PCM clock map regression failed.");
+        var longTake = new PacketTimeline(48000, startQpc / 10_000_000d);
+        for (uint packet = 0; packet < 20000; packet++)
+            longTake.GetOffset(48000, 0, 0, startQpc + packet * 10_010_000UL, packet * 48000L);
+        var bounded = longTake.GetClockAnchors();
+        if (bounded.Length > 4096 || bounded[0].frame != 0 || bounded[^1].frame != 19999 * 48000L)
+            throw new Exception("Clock-map bounds lost the beginning or end of a long take.");
     }
 }
 

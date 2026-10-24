@@ -16,6 +16,8 @@ const originalExists = fsSync.existsSync;
 const originalRename = fs.rename;
 const originalReadFile = fs.readFile;
 const originalOpen = fs.open;
+const originalStat = fs.stat;
+const originalCreateReadStream = fsSync.createReadStream;
 const children = new Set();
 let audioBehavior = {},
   recorder;
@@ -122,8 +124,8 @@ async function setup() {
   const runtimeRoot = path.resolve('.runtime');
   await fs.mkdir(runtimeRoot, { recursive: true });
   const dataDir = await fs.mkdtemp(path.join(runtimeRoot, 'session-delete-tests-'));
-  const port = 40000 + Math.floor(Math.random() * 15000);
-  const app = await startServer({ port, dataDir });
+  const app = await startServer({ port: 0, dataDir });
+  const { port } = app;
   const ws = new WebSocket(`ws://127.0.0.1:${port}`, { origin: `http://127.0.0.1:${port}` });
   const messages = [];
   ws.on('message', (bytes) => messages.push(JSON.parse(bytes.toString())));
@@ -143,6 +145,9 @@ async function setup() {
       fs.rename = originalRename;
       fs.readFile = originalReadFile;
       fs.open = originalOpen;
+      fs.stat = originalStat;
+      fsSync.createReadStream = originalCreateReadStream;
+      syncBuiltinESMExports();
       for (const child of children) if (child.complete) child.complete();
       ws.close();
       await app.close();
@@ -187,6 +192,8 @@ test.after(() => {
   fs.rename = originalRename;
   fs.readFile = originalReadFile;
   fs.open = originalOpen;
+  fs.stat = originalStat;
+  fsSync.createReadStream = originalCreateReadStream;
   syncBuiltinESMExports();
 });
 
@@ -387,6 +394,86 @@ test('session read lease prevents a take being moved midway through a read', asy
     assert.equal((await remove(client, id)).status, 200);
   } finally {
     release?.();
+    await client.close();
+  }
+});
+
+test('media lease protects stat-to-open and releases after range, HEAD and invalid-range responses', async () => {
+  const client = await setup();
+  let release;
+  try {
+    const { id } = await fixture(client);
+    let entered = false;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    fs.stat = async (file, ...args) => {
+      const result = await originalStat(file, ...args);
+      if (file === path.join(client.dataDir, id + '.wav')) {
+        entered = true;
+        await gate;
+      }
+      return result;
+    };
+    const reading = client.request('/media/' + id + '.wav', { headers: { Range: 'bytes=44-83' } });
+    await until(() => entered);
+    assert.equal((await remove(client, id)).status, 409);
+    release();
+    const response = await reading;
+    assert.equal(response.status, 206);
+    assert.equal((await response.arrayBuffer()).byteLength, 40);
+    fs.stat = originalStat;
+    assert.equal(
+      (await client.request('/media/' + id + '.session.json', { method: 'HEAD' })).status,
+      200,
+    );
+    assert.equal(
+      (await client.request('/media/' + id + '.wav', { headers: { Range: 'bytes=999999-' } }))
+        .status,
+      416,
+    );
+    assert.equal((await remove(client, id)).status, 200);
+  } finally {
+    release?.();
+    await client.close();
+  }
+});
+
+test('aborted media and read errors close their stream and release deletion leases', async () => {
+  const client = await setup();
+  try {
+    for (const failure of ['abort', 'error']) {
+      const { id } = await fixture(client);
+      let reader;
+      fsSync.createReadStream = (file, ...args) => {
+        if (file !== path.join(client.dataDir, id + '.wav'))
+          return originalCreateReadStream(file, ...args);
+        reader = new PassThrough();
+        return reader;
+      };
+      syncBuiltinESMExports();
+      const controller = new AbortController();
+      const pending = client.request('/media/' + id + '.wav', { signal: controller.signal });
+      await until(() => reader);
+      assert.equal((await remove(client, id)).status, 409);
+      if (failure === 'abort') {
+        reader.write(Buffer.alloc(64));
+        const response = await pending;
+        controller.abort();
+        await assert.rejects(response.arrayBuffer());
+      } else {
+        reader.destroy(new Error('Injected media read failure'));
+        await assert.rejects(pending);
+      }
+      await until(() => reader.closed);
+      assert.equal(
+        (await client.request('/api/state')).status,
+        200,
+        'Read errors must not terminate the server.',
+      );
+      assert.equal((await remove(client, id)).status, 200);
+    }
+  } finally {
     await client.close();
   }
 });
