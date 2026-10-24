@@ -1,0 +1,8 @@
+node_modules/
+recordings/
+native-audio/bin/
+native-audio/obj/
+.runtime/
+*.log
+*.tmp
+test-results/
