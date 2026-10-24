@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Luma Piano — 연주를 빛으로</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Luma Piano 홈"
+        ><span class="brand-mark">◈</span
+        ><span
+          >LUMA<span class="brand-light"> PIANO</span><small>PERFORMANCE STUDIO</small></span
+        ></a
+      >
+      <nav>
+        <button class="nav active" id="liveTab">라이브 스튜디오</button
+        ><button class="nav" id="libraryTab">내 연주 <span id="sessionCount">0</span></button>
+      </nav>
+      <div class="header-actions">
+        <span class="server-pill" id="serverState"><i></i> 연결 중</span
+        ><button
+          class="icon-button"
+          id="helpButton"
+          title="Kontakt 연결 안내"
+          aria-label="Kontakt 연결 안내"
+        >
+          ?</button
+        ><button class="button outline" id="obsButton">↗ OBS 브라우저 소스</button>
+      </div>
+    </header>
+    <main class="workspace">
+      <section class="studio-column">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">YOUR MUSIC, IN MOTION</p>
+            <h1>연주를 빛으로.</h1>
+            <p class="subtitle">건반 위의 순간을 담고, 나만의 장면으로 만드세요.</p>
+          </div>
+          <button class="button subdued" id="demoButton"><span>▷</span> 데모 미리보기</button>
+        </div>
+        <section class="preview-frame" aria-label="피아노 시각화 미리보기">
+          <canvas id="pianoCanvas"></canvas>
+          <div class="stage-top">
+            <span class="mode-tag" id="modeTag"><i></i> LIVE</span
+            ><span id="stageCaption">MIDI 입력 대기 중</span>
+            <div class="stage-tools">
+              <button id="fullscreenButton" title="시각화 전체 화면" aria-label="시각화 전체 화면">
+                ⛶
+              </button>
+            </div>
+          </div>
+          <div class="empty-message" id="emptyMessage">
+            <span class="empty-symbol">♩</span>
+            <h2>첫 음을 기다리고 있어요.</h2>
+            <p>MIDI를 연결하거나 데모로 빛의 움직임을 살펴보세요.</p>
+            <button class="text-button" id="emptyDemo">데모 연주 시작 <span>→</span></button>
+          </div>
+          <div class="stage-bottom">
+            <span id="stageNotes">0 NOTES</span><span id="stageDirection">RISING · REAL TIME</span
+            ><span id="stageKeys">88 KEYS</span>
+          </div>
+        </section>
+        <div class="transport-bar">
+          <button
+            id="playButton"
+            class="play-button"
+            title="재생 / 일시정지"
+            aria-label="재생 / 일시정지"
+          >
+            ▶
+          </button>
+          <div class="transport-title">
+            <strong id="takeTitle">라이브 연주</strong
+            ><span id="takeSubtitle">지금 연주하는 음을 실시간으로 표시합니다.</span>
+          </div>
+          <span class="time-code" id="currentTime">00:00</span
+          ><input
+            type="range"
+            id="seek"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0"
+            aria-label="연주 재생 위치"
+            disabled
+          /><span class="time-code muted" id="duration">LIVE</span
+          ><button
+            class="icon-button"
+            id="returnLive"
+            title="실시간 입력으로 돌아가기"
+            aria-label="실시간 입력으로 돌아가기"
+          >
+            ↺
+          </button>
+        </div>
+        <div class="connection-strip">
+          <div class="connection-icon">⌁</div>
+          <div class="connection-label">
+            <span class="micro-label">MIDI INPUT</span
+            ><select id="midiInput" aria-label="MIDI 입력 장치">
+              <option value="">장치 검색 중…</option>
+            </select>
+          </div>
+          <button
+            class="icon-button"
+            id="refreshPorts"
+            title="MIDI 장치 새로고침"
+            aria-label="MIDI 장치 새로고침"
+          >
+            ↻</button
+          ><button class="button small" id="connectButton">연결</button>
+          <div class="connection-separator"></div>
+          <div class="signal"><i id="midiLight"></i><span id="midiStatus">연결되지 않음</span></div>
+          <span class="event-count" id="eventCount">0 events</span
+          ><button class="text-button panic" id="panicButton" title="계속 울리는 노트 초기화">
+            노트 초기화
+          </button>
+        </div>
+        <section class="capture-card">
+          <div class="capture-head">
+            <div>
+              <span class="eyebrow">CAPTURE A MOMENT</span>
+              <h2>다시 꺼내 볼 연주.</h2>
+            </div>
+            <span class="format-badge">MIDI + WAV</span>
+          </div>
+          <div class="capture-row">
+            <label class="take-name"
+              ><span>연주 이름</span
+              ><input id="takeName" maxlength="120" placeholder="오늘의 첫 번째 연주" /></label
+            ><label class="audio-choice"
+              ><span
+                >오디오 소스
+                <button type="button" id="refreshAudio" title="Kontakt 다시 찾기">↻</button></span
+              ><select id="audioProcess" aria-label="녹음할 Kontakt 프로세스">
+                <option value="">Kontakt 찾는 중…</option>
+              </select></label
+            ><button class="record-button" id="recordButton">
+              <span class="record-dot"></span><span id="recordLabel">녹음 시작</span>
+            </button>
+          </div>
+          <div class="capture-foot">
+            <label class="checkbox"
+              ><input type="checkbox" id="withAudio" checked /><span
+                >Kontakt 소리만 함께 녹음</span
+              ></label
+            >
+            <div class="audio-meter" title="Kontakt 오디오 입력 레벨"><i id="audioMeter"></i></div>
+            <span id="recordHint"
+              >연주 데이터와 원음을 따로 보관해 언제든 다시 스타일링할 수 있어요.</span
+            >
+          </div>
+        </section>
+        <section class="library" id="library">
+          <div class="library-heading">
+            <div>
+              <span class="eyebrow">YOUR COLLECTION</span>
+              <h2>저장한 연주 <span id="libraryCount">0</span></h2>
+            </div>
+            <div class="library-actions">
+              <button class="text-button" id="importButton">세션 가져오기 ↗</button
+              ><button class="text-button" id="folderButton">저장 폴더 ↗</button
+              ><input type="file" id="importFile" accept="application/json,.json" hidden />
+            </div>
+          </div>
+          <div id="sessionList" class="session-list">
+            <div class="library-empty">아직 담아 둔 연주가 없어요. 첫 연주를 녹음해 보세요.</div>
+          </div>
+        </section>
+      </section>
+      <aside class="settings-panel">
+        <div class="panel-heading">
+          <span>장면 디자인</span><span class="micro-label">APPEARANCE</span>
+        </div>
+        <section class="setting-section">
+          <div class="setting-label">
+            <h3>빛의 색</h3>
+            <span id="themeName">Aurora</span>
+          </div>
+          <div class="theme-grid">
+            <button class="theme active" data-theme="aurora">
+              <i class="aurora"></i><span>Aurora</span><small>차분한 청록</small></button
+            ><button class="theme" data-theme="amber">
+              <i class="amber"></i><span>Golden</span><small>따뜻한 금빛</small></button
+            ><button class="theme" data-theme="violet">
+              <i class="violet"></i><span>Violet</span><small>은은한 보랏빛</small>
+            </button>
+          </div>
+        </section>
+        <section class="setting-section">
+          <div class="setting-label">
+            <h3>노트의 흐름</h3>
+            <span class="setting-value" id="flowDescription">실시간</span>
+          </div>
+          <div class="segmented">
+            <button data-direction="up" class="active">↑ 위로 피어오르기</button
+            ><button data-direction="down">↓ 아래로 내려오기</button>
+          </div>
+          <p class="setting-help" id="flowHelp">실시간 연주는 건반에서 위로 뻗어 나갑니다.</p>
+          <div class="setting-label range-label">
+            <label for="secondsVisible">화면에 머무는 시간</label
+            ><span id="secondsValue">6.0초</span>
+          </div>
+          <input id="secondsVisible" type="range" min="2" max="12" step="0.5" value="6" />
+          <div class="range-ends"><span>빠르고 경쾌하게</span><span>느리고 여유롭게</span></div>
+        </section>
+        <section class="setting-section">
+          <div class="setting-label"><h3>빛과 입자</h3></div>
+          <label class="toggle-row"
+            ><span><b>파티클</b><small>타건 순간에 흩어지는 빛</small></span
+            ><input type="checkbox" id="particles" checked class="switch"
+          /></label>
+          <div class="setting-label range-label">
+            <label for="glow">글로우 강도</label><span id="glowValue">75%</span>
+          </div>
+          <input id="glow" type="range" min="0" max="1" step="0.05" value="0.75" />
+        </section>
+        <section class="setting-section">
+          <div class="setting-label"><h3>화면 구성</h3></div>
+          <label class="toggle-row"
+            ><span>피아노 건반</span
+            ><input type="checkbox" id="keyboard" checked class="switch" /></label
+          ><label class="toggle-row"
+            ><span>음 이름 표시</span><input type="checkbox" id="labels" checked class="switch"
+          /></label>
+          <div class="setting-label range-label">
+            <label for="noteRange">건반 범위</label
+            ><select id="noteRange">
+              <option value="88">전체 88건반</option>
+              <option value="61">61건반 · C2–C7</option>
+              <option value="49">49건반 · Keystation</option>
+              <option value="37">중앙 37건반</option>
+            </select>
+          </div>
+          <label class="toggle-row"
+            ><span>투명 배경<small>OBS·오버레이에 적용</small></span
+            ><input type="checkbox" id="transparent" class="switch"
+          /></label>
+        </section>
+        <section class="setting-section overlay-section">
+          <span class="eyebrow">BEYOND THE WINDOW</span>
+          <h3>화면 위에 펼쳐 보세요.</h3>
+          <p>작업 화면 위에서 연주를 즐기는<br />클릭 통과형 투명 오버레이.</p>
+          <select id="displaySelect" aria-label="오버레이 모니터 선택">
+            <option value="">기본 모니터</option></select
+          ><button class="button overlay-button" id="overlayButton">⛶ 데스크톱 오버레이</button
+          ><small
+            >켜기 / 끄기 <kbd>Ctrl Shift F10</kbd><br />화면으로 돌아오기
+            <kbd>Ctrl Shift F12</kbd></small
+          >
+        </section>
+        <div class="panel-footer"><span class="tiny-logo">◈</span> Made for your moments.</div>
+      </aside>
+    </main>
+    <footer class="app-footer">
+      <span>LUMA PIANO <b>LOCAL STUDIO</b></span
+      ><span>연주 데이터는 이 컴퓨터에만 저장됩니다.</span
+      ><span id="footerStatus">Waiting for your first note.</span>
+    </footer>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <dialog id="helpDialog">
+      <button class="dialog-close" data-close="helpDialog" aria-label="닫기">×</button
+      ><span class="eyebrow">MAKE THE CONNECTION</span>
+      <h2>Kontakt와 연결하기</h2>
+      <p>Keystation → Kontakt → 가상 MIDI 포트 → Luma Piano</p>
+      <ol>
+        <li>
+          <a
+            href="https://www.tobias-erichsen.de/software/loopmidi.html"
+            target="_blank"
+            rel="noreferrer"
+            >loopMIDI</a
+          >에서 <strong>Luma Piano</strong> 포트를 만듭니다.
+        </li>
+        <li>
+          Kontakt <strong>Options → MIDI → Outputs</strong>에서 Luma Piano를 <strong>On</strong>으로
+          설정합니다.
+        </li>
+        <li>
+          <strong>Engine → Send MIDI to outside world</strong>에서 <strong>Incoming notes</strong>,
+          <strong>Incoming CCs</strong>, <strong>GUI keyboard</strong>를 체크합니다.
+        </li>
+        <li>
+          Kontakt MIDI Inputs의 Luma Piano는 <strong>Off</strong>로 둡니다. Keystation 입력은 그대로
+          유지하세요.
+        </li>
+        <li>
+          이 화면에서 MIDI 장치를 새로고침하고 <strong>Luma Piano → 연결</strong>을 누른 뒤 건반을
+          연주합니다.
+        </li>
+      </ol>
+      <p class="dialog-note">
+        포트가 안 보이면 Kontakt를 다시 실행하세요. 스크립트 생성 노트는 해당 기능을 쓰는 악기에만
+        추가로 켜 주세요. 화면 건반 테스트만으로는 외장 건반·페달 연결이 모두 검증되지 않습니다.
+      </p>
+      <h3>Kontakt 전용 오디오</h3>
+      <p>
+        녹음 시 Windows의 프로세스별 오디오 캡처를 사용합니다. 다른 앱 소리와 마이크는 녹음하지
+        않습니다. 소리는 들리는데 녹음 미터가 움직이지 않으면 Kontakt의 ASIO / 독점 출력 대신 WASAPI
+        공유 출력을 확인하세요.
+      </p>
+      <button class="button" data-close="helpDialog">알겠습니다</button>
+    </dialog>
+    <dialog id="obsDialog">
+      <button class="dialog-close" data-close="obsDialog" aria-label="닫기">×</button
+      ><span class="eyebrow">READY FOR YOUR SCENE</span>
+      <h2>OBS 브라우저 소스</h2>
+      <p>OBS에서 <strong>소스 추가 → 브라우저</strong>를 선택한 다음 아래 주소를 붙여 넣으세요.</p>
+      <div class="copy-row">
+        <input
+          readonly
+          id="obsUrl"
+          value="http://127.0.0.1:3210/stage?transparent=1"
+          aria-label="OBS 브라우저 소스 주소"
+        /><button class="button" id="copyObs">복사</button>
+      </div>
+      <div class="obs-specs">
+        <span>WIDTH <strong>1920</strong></span
+        ><span>HEIGHT <strong>1080</strong></span
+        ><span>FPS <strong>60</strong></span>
+      </div>
+      <p>
+        투명 배경으로 노트와 건반만 표시합니다. 디자인 설정과 재생 위치는 스튜디오와 함께 바뀝니다.
+      </p>
+      <label class="checkbox"
+        ><input type="checkbox" id="obsAudio" /><span>저장된 연주 재생 시 원음도 출력</span></label
+      >
+      <p class="dialog-note">
+        라이브 소리는 OBS의 「응용 프로그램 오디오 캡처」에서 Kontakt를 선택하세요. 재생 원음은 위
+        옵션으로 브라우저 소스에 넣을 수 있습니다. 원음 중복을 피하려면 한 경로만 켜세요. Luma
+        Piano는 실행된 상태여야 합니다.
+      </p>
+      <button class="button outline" id="openStage">소스 화면 미리보기 ↗</button>
+    </dialog>
+    <dialog id="exportDialog">
+      <span class="eyebrow">RENDER YOUR PERFORMANCE</span>
+      <h2 id="exportTitle">영상으로 담는 중</h2>
+      <p id="exportDescription">
+        현재 디자인으로 1920 × 1080 영상을 생성합니다. 연주 길이만큼 시간이 걸립니다.
+      </p>
+      <progress id="exportProgress" max="1" value="0"></progress>
+      <p id="exportStatus">준비 중…</p>
+      <button class="button outline" id="cancelExport">취소</button
+      ><a class="button" id="exportDownload" hidden download>영상 다운로드</a>
+    </dialog>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

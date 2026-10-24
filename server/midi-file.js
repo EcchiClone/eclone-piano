@@ -27,34 +27,42 @@ export function encodeMidi(events, duration) {
     throw new RangeError('MIDI duration must be a finite, nonnegative number of seconds.');
   }
   let endSeconds = duration ?? 0;
-  const ordered = events.map((event, index) => {
-    if (!event || !Number.isFinite(event.t) || event.t < 0) {
-      throw new RangeError(`MIDI event ${index} has an invalid time.`);
-    }
-    if (!Array.isArray(event.data) && !(event.data instanceof Uint8Array)) {
-      throw new TypeError(`MIDI event ${index} must contain a byte array.`);
-    }
-    const data = Array.from(event.data);
-    if (!data.length || !data.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)) {
-      throw new RangeError(`MIDI event ${index} contains an invalid byte.`);
-    }
-    const status = data[0];
-    if (status < 0x80) throw new RangeError(`MIDI event ${index} requires an explicit status byte.`);
-    if (status < 0xf0) {
-      const expected = (status & 0xe0) === 0xc0 ? 2 : 3;
-      if (data.length !== expected || data.slice(1).some(byte => byte > 127)) {
-        throw new RangeError(`MIDI event ${index} is not a complete channel message.`);
+  const ordered = events
+    .map((event, index) => {
+      if (!event || !Number.isFinite(event.t) || event.t < 0) {
+        throw new RangeError(`MIDI event ${index} has an invalid time.`);
       }
-    }
-    endSeconds = Math.max(endSeconds, event.t);
-    const tick = Math.round(event.t * TICKS_PER_SECOND);
-    if (!Number.isSafeInteger(tick) || tick > MAX_TIMELINE_TICKS) throw new RangeError(`MIDI event ${index} exceeds the supported timeline.`);
-    return { tick, time: event.t, data, index };
-  }).filter(event => event.data[0] < 0xf0)
+      if (!Array.isArray(event.data) && !(event.data instanceof Uint8Array)) {
+        throw new TypeError(`MIDI event ${index} must contain a byte array.`);
+      }
+      const data = Array.from(event.data);
+      if (
+        !data.length ||
+        !data.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+      ) {
+        throw new RangeError(`MIDI event ${index} contains an invalid byte.`);
+      }
+      const status = data[0];
+      if (status < 0x80)
+        throw new RangeError(`MIDI event ${index} requires an explicit status byte.`);
+      if (status < 0xf0) {
+        const expected = (status & 0xe0) === 0xc0 ? 2 : 3;
+        if (data.length !== expected || data.slice(1).some((byte) => byte > 127)) {
+          throw new RangeError(`MIDI event ${index} is not a complete channel message.`);
+        }
+      }
+      endSeconds = Math.max(endSeconds, event.t);
+      const tick = Math.round(event.t * TICKS_PER_SECOND);
+      if (!Number.isSafeInteger(tick) || tick > MAX_TIMELINE_TICKS)
+        throw new RangeError(`MIDI event ${index} exceeds the supported timeline.`);
+      return { tick, time: event.t, data, index };
+    })
+    .filter((event) => event.data[0] < 0xf0)
     .sort((a, b) => a.time - b.time || a.index - b.index);
 
   const endTick = Math.round(endSeconds * TICKS_PER_SECOND);
-  if (!Number.isSafeInteger(endTick) || endTick > MAX_TIMELINE_TICKS) throw new RangeError('MIDI duration exceeds the supported timeline.');
+  if (!Number.isSafeInteger(endTick) || endTick > MAX_TIMELINE_TICKS)
+    throw new RangeError('MIDI duration exceeds the supported timeline.');
 
   // Tempo is explicit so other applications reproduce the recording's seconds.
   const track = [0, 0xff, 0x51, 3, 0x07, 0xa1, 0x20];

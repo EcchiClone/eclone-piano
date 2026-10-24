@@ -45,10 +45,13 @@ function parse(bytes) {
 }
 
 test('encodes exact seconds with explicit tempo, VLQ deltas and trailing duration', () => {
-  const bytes = encodeMidi([
-    { t: 0, data: [144, 60, 100] },
-    { t: 1, data: [128, 60, 20] },
-  ], 1.5);
+  const bytes = encodeMidi(
+    [
+      { t: 0, data: [144, 60, 100] },
+      { t: 1, data: [128, 60, 20] },
+    ],
+    1.5,
+  );
   const events = parse(bytes);
   assert.deepEqual(events, [
     { tick: 0, meta: 81, data: [7, 161, 32] },
@@ -60,32 +63,49 @@ test('encodes exact seconds with explicit tempo, VLQ deltas and trailing duratio
 });
 
 test('releases unreleased notes and sustain independently on each MIDI channel', () => {
-  const events = parse(encodeMidi([
-    { t: 0, data: [145, 64, 90] },
-    { t: 0.1, data: [177, 64, 127] },
-    { t: 0.2, data: [146, 64, 70] },
-    { t: 0.3, data: [146, 64, 0] },
-  ], 2));
-  assert.deepEqual(events.filter(event => event.tick === 1920), [
-    { tick: 1920, data: [129, 64, 0] },
-    { tick: 1920, data: [177, 64, 0] },
-    { tick: 1920, meta: 47, data: [] },
-  ]);
+  const events = parse(
+    encodeMidi(
+      [
+        { t: 0, data: [145, 64, 90] },
+        { t: 0.1, data: [177, 64, 127] },
+        { t: 0.2, data: [146, 64, 70] },
+        { t: 0.3, data: [146, 64, 0] },
+      ],
+      2,
+    ),
+  );
+  assert.deepEqual(
+    events.filter((event) => event.tick === 1920),
+    [
+      { tick: 1920, data: [129, 64, 0] },
+      { tick: 1920, data: [177, 64, 0] },
+      { tick: 1920, meta: 47, data: [] },
+    ],
+  );
 });
 
 test('preserves controller, program, pressure and pitch messages while ignoring transport', () => {
-  const events = parse(encodeMidi([
-    { t: 0, data: [0xf8] },
-    { t: 0, data: [192, 10] },
-    { t: 0.1, data: [208, 60] },
-    { t: 0.2, data: [224, 0, 64] },
-    { t: 0.3, data: [160, 60, 22] },
-    { t: 0.4, data: [176, 11, 85] },
-    { t: 0.5, data: [0xfe] },
-  ]));
-  assert.deepEqual(events.filter(event => event.meta === undefined).map(event => event.data), [
-    [192, 10], [208, 60], [224, 0, 64], [160, 60, 22], [176, 11, 85],
-  ]);
+  const events = parse(
+    encodeMidi([
+      { t: 0, data: [0xf8] },
+      { t: 0, data: [192, 10] },
+      { t: 0.1, data: [208, 60] },
+      { t: 0.2, data: [224, 0, 64] },
+      { t: 0.3, data: [160, 60, 22] },
+      { t: 0.4, data: [176, 11, 85] },
+      { t: 0.5, data: [0xfe] },
+    ]),
+  );
+  assert.deepEqual(
+    events.filter((event) => event.meta === undefined).map((event) => event.data),
+    [
+      [192, 10],
+      [208, 60],
+      [224, 0, 64],
+      [160, 60, 22],
+      [176, 11, 85],
+    ],
+  );
   assert.equal(events.at(-1).tick, 480);
 });
 
@@ -98,33 +118,71 @@ test('sorts events without changing equal-time order or mutating the source', ()
   const copy = structuredClone(source);
   const events = parse(encodeMidi(source, 2));
   assert.deepEqual(source, copy);
-  assert.deepEqual(events.filter(event => event.tick === 960).map(event => event.data), [[128, 60, 0], [144, 60, 50]]);
-  assert.deepEqual(events.filter(event => event.tick === 1920 && event.meta === undefined).map(event => event.data), [[128, 60, 0]]);
+  assert.deepEqual(
+    events.filter((event) => event.tick === 960).map((event) => event.data),
+    [
+      [128, 60, 0],
+      [144, 60, 50],
+    ],
+  );
+  assert.deepEqual(
+    events
+      .filter((event) => event.tick === 1920 && event.meta === undefined)
+      .map((event) => event.data),
+    [[128, 60, 0]],
+  );
 });
 
 test('counts overlapping same-pitch notes and honors reset/all-notes-off controllers', () => {
-  const repeated = parse(encodeMidi([
-    { t: 0, data: [144, 60, 90] },
-    { t: 0.1, data: [144, 60, 80] },
-    { t: 0.2, data: [128, 60, 0] },
-  ], 1));
-  assert.equal(repeated.filter(event => event.tick === 960 && event.data[0] === 128).length, 1);
-  const reset = parse(encodeMidi([
-    { t: 0, data: [144, 60, 90] },
-    { t: 0, data: [176, 64, 127] },
-    { t: 0.1, data: [176, 123, 0] },
-    { t: 0.2, data: [176, 121, 0] },
-  ], 1));
-  assert.deepEqual(reset.filter(event => event.tick === 960), [{ tick: 960, meta: 47, data: [] }]);
+  const repeated = parse(
+    encodeMidi(
+      [
+        { t: 0, data: [144, 60, 90] },
+        { t: 0.1, data: [144, 60, 80] },
+        { t: 0.2, data: [128, 60, 0] },
+      ],
+      1,
+    ),
+  );
+  assert.equal(repeated.filter((event) => event.tick === 960 && event.data[0] === 128).length, 1);
+  const reset = parse(
+    encodeMidi(
+      [
+        { t: 0, data: [144, 60, 90] },
+        { t: 0, data: [176, 64, 127] },
+        { t: 0.1, data: [176, 123, 0] },
+        { t: 0.2, data: [176, 121, 0] },
+      ],
+      1,
+    ),
+  );
+  assert.deepEqual(
+    reset.filter((event) => event.tick === 960),
+    [{ tick: 960, meta: 47, data: [] }],
+  );
 });
 
 test('sub-tick events retain chronological ordering after time quantization', () => {
-  const events = parse(encodeMidi([
-    { t: 0.1002, data: [128, 60, 0] },
-    { t: 0.1001, data: [144, 60, 90] },
-  ], 1));
-  assert.deepEqual(events.filter(event => event.tick === 96).map(event => event.data), [[144, 60, 90], [128, 60, 0]]);
-  assert.deepEqual(events.filter(event => event.tick === 960), [{ tick: 960, meta: 47, data: [] }]);
+  const events = parse(
+    encodeMidi(
+      [
+        { t: 0.1002, data: [128, 60, 0] },
+        { t: 0.1001, data: [144, 60, 90] },
+      ],
+      1,
+    ),
+  );
+  assert.deepEqual(
+    events.filter((event) => event.tick === 96).map((event) => event.data),
+    [
+      [144, 60, 90],
+      [128, 60, 0],
+    ],
+  );
+  assert.deepEqual(
+    events.filter((event) => event.tick === 960),
+    [{ tick: 960, meta: 47, data: [] }],
+  );
 });
 
 test('empty recording is valid and duration cannot truncate recorded events', () => {
@@ -145,7 +203,8 @@ test('rejects malformed data instead of writing corrupt SMF bytes', () => {
     { t: 0, data: [144, 60, 128] },
     { t: 0, data: [144, 60.5, 1] },
     { t: 0, data: [60, 1] },
-  ]) assert.throws(() => encodeMidi([event], 1), RangeError);
+  ])
+    assert.throws(() => encodeMidi([event], 1), RangeError);
 });
 
 test('long silence uses legal four-byte VLQs and preserves absolute time', () => {

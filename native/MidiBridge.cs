@@ -55,6 +55,7 @@ namespace PianoVisualizer.Native
         {
             public uint Packed;
             public double Timestamp;
+            public double QpcTimestamp;
             public int Generation;
         }
 
@@ -133,7 +134,7 @@ namespace PianoVisualizer.Native
                         if (length == 0) continue;
                         int[] bytes = new int[length];
                         for (int i = 0; i < length; i++) bytes[i] = (int)((packet.Packed >> (i * 8)) & 255);
-                        Emit(new { type = "midi", data = bytes, timestamp = packet.Timestamp, inputId = inputId });
+                        Emit(new { type = "midi", data = bytes, timestamp = packet.Timestamp, qpcTimestamp = packet.QpcTimestamp, inputId = inputId });
                     }
                     int dropped = Interlocked.Exchange(ref droppedMessages, 0);
                     if (dropped > 0) Emit(new { type = "error", code = "input-overflow", message = "MIDI input queue overflow; reset active notes.", dropped = dropped });
@@ -156,7 +157,7 @@ namespace PianoVisualizer.Native
                 Interlocked.Increment(ref droppedMessages);
                 return;
             }
-            midi.Enqueue(new MidiPacket { Packed = unchecked((uint)parameter1.ToUInt64()), Timestamp = clock.Elapsed.TotalMilliseconds, Generation = generation });
+            midi.Enqueue(new MidiPacket { Packed = unchecked((uint)parameter1.ToUInt64()), Timestamp = clock.Elapsed.TotalMilliseconds, QpcTimestamp = Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency, Generation = generation });
             wake.Set();
         }
 

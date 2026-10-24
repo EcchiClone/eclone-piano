@@ -1,13 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Performance, pianoLayout } from '../public/engine.js';
+import { Performance, PianoRenderer, pianoLayout } from '../public/engine.js';
 
 test('note on, zero-velocity note off, and physical vs sounding state', () => {
   const p = new Performance();
   p.ingest({ t: 1, data: [0x90, 60, 100] });
   assert.equal(p.activeAt(1).length, 1);
   p.ingest({ t: 2, data: [0x90, 60, 0] });
-  assert.deepEqual(p.notes[0], { id: 1, note: 60, velocity: 100, channel: 0, start: 1, release: 2, end: 2 });
+  assert.deepEqual(p.notes[0], {
+    id: 1,
+    note: 60,
+    velocity: 100,
+    channel: 0,
+    start: 1,
+    release: 2,
+    end: 2,
+  });
   assert.equal(p.activeAt(2).length, 0);
 });
 
@@ -65,7 +73,14 @@ test('recording round trip preserves sustain and closes unfinished notes at dura
 });
 
 test('import sorts events stably, ignores malformed MIDI and rejects missing event lists', () => {
-  const p = Performance.fromJSON({ duration: 2, events: [{ t: 1, data: [0x80, 60, 0] }, { t: 0, data: [0x90, 60, 100] }, { t: -1, data: [0x90, 40, 100] }] });
+  const p = Performance.fromJSON({
+    duration: 2,
+    events: [
+      { t: 1, data: [0x80, 60, 0] },
+      { t: 0, data: [0x90, 60, 100] },
+      { t: -1, data: [0x90, 40, 100] },
+    ],
+  });
   assert.equal(p.notes[0].start, 0);
   assert.equal(p.notes[0].end, 1);
   assert.equal(p.ingest({ t: 3, data: [0x90, 200, 80] }), null);
@@ -87,12 +102,64 @@ test('pruning leaves sounding notes and recording data intact', () => {
 test('88-key layout contains 52 whites and 36 blacks with C-sharp at the C/D boundary', () => {
   const layout = pianoLayout(1040);
   assert.equal(layout.keys.length, 88);
-  assert.equal(layout.keys.filter(k => !k.black).length, 52);
-  assert.equal(layout.keys.filter(k => k.black).length, 36);
+  assert.equal(layout.keys.filter((k) => !k.black).length, 52);
+  assert.equal(layout.keys.filter((k) => k.black).length, 36);
   const c = layout.byNote.get(60);
   const cs = layout.byNote.get(61);
   assert.ok(Math.abs(cs.center - (c.x + c.width)) < 1e-8);
   assert.ok(Math.abs(layout.keys[0].x) < 1e-8);
   const last = layout.keys.at(-1);
   assert.ok(Math.abs(last.x + last.width - 1040) < 1e-8);
+});
+
+test('explicit export pixelRatio keeps a 1080p canvas exact on a high-DPI display', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'devicePixelRatio');
+  Object.defineProperty(globalThis, 'devicePixelRatio', { value: 3, configurable: true });
+  try {
+    const ctx = Object.fromEntries(
+      [
+        'setTransform',
+        'clearRect',
+        'save',
+        'restore',
+        'beginPath',
+        'rect',
+        'clip',
+        'moveTo',
+        'lineTo',
+        'stroke',
+      ].map((name) => [name, () => {}]),
+    );
+    const makeCanvas = () => ({
+      width: 300,
+      height: 150,
+      getContext: () => ctx,
+      getBoundingClientRect: () => ({ width: 1920, height: 1080 }),
+    });
+    const settings = {
+      background: 'transparent',
+      keyboard: false,
+      particles: false,
+      glow: 0,
+      quality: 2,
+      pixelRatio: 1,
+    };
+    const canvas = makeCanvas();
+    const renderer = new PianoRenderer(canvas, () => settings);
+    assert.equal(canvas.width, 1920);
+    assert.equal(canvas.height, 1080);
+    assert.equal(renderer.ratio, 1);
+    delete settings.pixelRatio;
+    renderer.resize();
+    assert.equal(
+      canvas.width,
+      7680,
+      'Without an override, capped device DPI and quality still apply.',
+    );
+    assert.equal(canvas.height, 4320);
+    renderer.destroy();
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'devicePixelRatio', previous);
+    else delete globalThis.devicePixelRatio;
+  }
 });

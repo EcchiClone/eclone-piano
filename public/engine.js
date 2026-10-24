@@ -6,10 +6,12 @@
 const BLACK = new Set([1, 3, 6, 8, 10]);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const key = (channel, note) => `${channel}:${note}`;
-const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+const finite = (value, fallback = 0) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
 
 export class Performance {
-  constructor() { this.reset(); }
+  constructor() {
+    this.reset();
+  }
 
   reset() {
     this.notes = [];
@@ -21,7 +23,9 @@ export class Performance {
     return this;
   }
 
-  get duration() { return this.lastTime; }
+  get duration() {
+    return this.lastTime;
+  }
 
   ingest(event) {
     if (!event || !Array.isArray(event.data) || event.data.length < 1) return null;
@@ -29,7 +33,11 @@ export class Performance {
     if (!Number.isInteger(data[0]) || data[0] < 128 || data[0] > 239) return null;
     const command = data[0] & 0xf0;
     const required = command === 0xc0 || command === 0xd0 ? 2 : 3;
-    if (data.length < required || data.slice(1).some(n => !Number.isInteger(n) || n < 0 || n > 127)) return null;
+    if (
+      data.length < required ||
+      data.slice(1).some((n) => !Number.isInteger(n) || n < 0 || n > 127)
+    )
+      return null;
     const t = Math.max(this.lastTime, finite(event.t));
     this.lastTime = t;
     this.events.push({ t, data });
@@ -37,7 +45,15 @@ export class Performance {
     const pitch = data[1];
     const velocity = data[2];
     if (command === 0x90 && velocity > 0) {
-      const note = { id: this.nextId++, note: pitch, channel, velocity, start: t, release: Infinity, end: Infinity };
+      const note = {
+        id: this.nextId++,
+        note: pitch,
+        channel,
+        velocity,
+        start: t,
+        release: Infinity,
+        end: Infinity,
+      };
       const id = key(channel, pitch);
       const pressed = this.held.get(id) || [];
       pressed.push(note);
@@ -61,7 +77,12 @@ export class Performance {
         const down = velocity >= 64;
         if (this.pedals[channel] && !down) {
           for (const note of this.notes) {
-            if (note.channel === channel && Number.isFinite(note.release) && !Number.isFinite(note.end)) note.end = t;
+            if (
+              note.channel === channel &&
+              Number.isFinite(note.release) &&
+              !Number.isFinite(note.end)
+            )
+              note.end = t;
           }
         }
         this.pedals[channel] = down;
@@ -80,7 +101,12 @@ export class Performance {
       } else if (pitch === 121) {
         this.pedals[channel] = false;
         for (const note of this.notes) {
-          if (note.channel === channel && Number.isFinite(note.release) && !Number.isFinite(note.end)) note.end = t;
+          if (
+            note.channel === channel &&
+            Number.isFinite(note.release) &&
+            !Number.isFinite(note.end)
+          )
+            note.end = t;
         }
       }
     }
@@ -104,28 +130,37 @@ export class Performance {
     return this;
   }
 
-  finish(t = this.lastTime) { return this.silence(t); }
+  finish(t = this.lastTime) {
+    return this.silence(t);
+  }
 
   activeAt(t, physical = false) {
-    return this.notes.filter(note => note.start <= t && t < (physical ? note.release : note.end));
+    return this.notes.filter((note) => note.start <= t && t < (physical ? note.release : note.end));
   }
 
   /** Discard old visual history without discarding a recording's raw events. */
   prune(before, { events = false } = {}) {
-    this.notes = this.notes.filter(note => note.end >= before);
-    if (events) this.events = this.events.filter(event => event.t >= before);
+    this.notes = this.notes.filter((note) => note.end >= before);
+    if (events) this.events = this.events.filter((event) => event.t >= before);
     return this;
   }
 
   toJSON() {
-    return { version: 1, duration: this.duration, events: this.events.map(e => ({ t: e.t, data: [...e.data] })) };
+    return {
+      version: 1,
+      duration: this.duration,
+      events: this.events.map((e) => ({ t: e.t, data: [...e.data] })),
+    };
   }
 
   static fromJSON(value) {
-    if (!value || !Array.isArray(value.events)) throw new Error('Invalid performance: events array is required.');
+    if (!value || !Array.isArray(value.events))
+      throw new Error('Invalid performance: events array is required.');
     if (value.events.length > 2000000) throw new Error('Performance exceeds the event limit.');
     const performance = new Performance();
-    const events = value.events.filter(e => e && Number.isFinite(e.t) && e.t >= 0).sort((a, b) => a.t - b.t);
+    const events = value.events
+      .filter((e) => e && Number.isFinite(e.t) && e.t >= 0)
+      .sort((a, b) => a.t - b.t);
     for (const event of events) performance.ingest(event);
     performance.finish(Math.max(performance.duration, finite(value.duration)));
     return performance;
@@ -133,13 +168,33 @@ export class Performance {
 }
 
 export const THEMES = {
-  aurora: { main: [102, 232, 214], high: [192, 255, 241], low: [44, 135, 161], secondary: [145, 173, 255] },
-  amber: { main: [255, 202, 112], high: [255, 246, 199], low: [178, 105, 48], secondary: [255, 149, 111] },
-  violet: { main: [190, 155, 255], high: [238, 220, 255], low: [100, 75, 175], secondary: [241, 159, 210] },
+  aurora: {
+    main: [102, 232, 214],
+    high: [192, 255, 241],
+    low: [44, 135, 161],
+    secondary: [145, 173, 255],
+  },
+  amber: {
+    main: [255, 202, 112],
+    high: [255, 246, 199],
+    low: [178, 105, 48],
+    secondary: [255, 149, 111],
+  },
+  violet: {
+    main: [190, 155, 255],
+    high: [238, 220, 255],
+    low: [100, 75, 175],
+    secondary: [241, 159, 210],
+  },
 };
 const color = (rgb, alpha = 1) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${clamp(alpha, 0, 1)})`;
-const whiteBefore = note => { let n = 0; for (let i = 0; i < note; i++) if (!BLACK.has(i % 12)) n++; return n; };
-const noteName = note => `${['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'][note % 12]}${Math.floor(note / 12) - 1}`;
+const whiteBefore = (note) => {
+  let n = 0;
+  for (let i = 0; i < note; i++) if (!BLACK.has(i % 12)) n++;
+  return n;
+};
+const noteName = (note) =>
+  `${['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'][note % 12]}${Math.floor(note / 12) - 1}`;
 
 export function pianoLayout(width, minNote = 21, maxNote = 108) {
   minNote = clamp(Math.round(minNote), 0, 126);
@@ -155,7 +210,7 @@ export function pianoLayout(width, minNote = 21, maxNote = 108) {
     const x = (unit - (black ? 0.305 : 0)) * whiteWidth;
     keys.push({ note, black, x, width: w, center: x + w / 2 });
   }
-  return { keys, whiteWidth, byNote: new Map(keys.map(k => [k.note, k])) };
+  return { keys, whiteWidth, byNote: new Map(keys.map((k) => [k.note, k])) };
 }
 
 function rounded(ctx, x, y, width, height, radius = 3) {
@@ -169,6 +224,8 @@ function rounded(ctx, x, y, width, height, radius = 3) {
  * State: time, notes, direction:'up'|'down', theme, background:'dark'|'transparent',
  * particles, glow (0..1), keyboard, labels, minNote, maxNote, secondsVisible.
  * Optional: keyboardHeight (fraction 0.04..0.4), quality (0.5..2), grid, opacity.
+ * An explicit pixelRatio (0.5..4) overrides both device DPI and quality, letting
+ * export canvases keep exact output dimensions regardless of display scaling.
  * `renderAt(time, overrides)` also supports deterministic image/video export.
  */
 export class PianoRenderer {
@@ -183,7 +240,8 @@ export class PianoRenderer {
     this.height = canvas.height || 720;
     this.ratio = 1;
     this.layoutCache = null;
-    this.resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.resize()) : null;
+    this.resizeObserver =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.resize()) : null;
     this.resizeObserver?.observe(canvas);
     this.resize();
   }
@@ -192,9 +250,20 @@ export class PianoRenderer {
     const rect = this.canvas.getBoundingClientRect?.();
     const w = Math.max(1, Math.round(rect?.width || this.canvas.width || 1280));
     const h = Math.max(1, Math.round(rect?.height || this.canvas.height || 720));
-    const quality = clamp(finite(this.getState()?.quality, 1), 0.5, 2);
-    const ratio = Math.min(globalThis.devicePixelRatio || 1, 2) * quality;
-    if (this.width === w && this.height === h && this.ratio === ratio && this.canvas.width === Math.round(w * ratio)) return;
+    const state = this.getState() || {};
+    const quality = clamp(finite(state.quality, 1), 0.5, 2);
+    const requestedRatio = Number(state.pixelRatio);
+    const ratio =
+      Number.isFinite(requestedRatio) && requestedRatio > 0
+        ? clamp(requestedRatio, 0.5, 4)
+        : Math.min(globalThis.devicePixelRatio || 1, 2) * quality;
+    if (
+      this.width === w &&
+      this.height === h &&
+      this.ratio === ratio &&
+      this.canvas.width === Math.round(w * ratio)
+    )
+      return;
     this.width = w;
     this.height = h;
     this.ratio = ratio;
@@ -221,23 +290,42 @@ export class PianoRenderer {
     this.frame = null;
   }
 
-  destroy() { this.stop(); this.resizeObserver?.disconnect(); }
+  destroy() {
+    this.stop();
+    this.resizeObserver?.disconnect();
+  }
 
   renderAt(time, overrides = {}) {
-    const s = { direction: 'up', theme: 'aurora', background: 'dark', particles: true, glow: 0.7, keyboard: true, labels: true, minNote: 21, maxNote: 108, secondsVisible: 6, ...this.getState(), ...overrides };
+    const s = {
+      direction: 'up',
+      theme: 'aurora',
+      background: 'dark',
+      particles: true,
+      glow: 0.7,
+      keyboard: true,
+      labels: true,
+      minNote: 21,
+      maxNote: 108,
+      secondsVisible: 6,
+      ...this.getState(),
+      ...overrides,
+    };
     const t = finite(time, finite(s.time));
     const ctx = this.context;
     const w = this.width;
     const h = this.height;
     const theme = THEMES[s.theme] || THEMES.aurora;
     const glow = clamp(finite(s.glow, 0.7), 0, 1);
-    const keyboardHeight = s.keyboard ? Math.max(30, h * clamp(finite(s.keyboardHeight, 0.19), 0.04, 0.4)) : 0;
+    const keyboardHeight = s.keyboard
+      ? Math.max(30, h * clamp(finite(s.keyboardHeight, 0.19), 0.04, 0.4))
+      : 0;
     const strike = h - keyboardHeight;
     const seconds = clamp(finite(s.secondsVisible, 6), 1, 30);
     const speed = strike / seconds;
     const down = s.direction === 'down';
     const cacheKey = `${w}:${s.minNote}:${s.maxNote}`;
-    if (this.layoutCache?.key !== cacheKey) this.layoutCache = { key: cacheKey, ...pianoLayout(w, s.minNote, s.maxNote) };
+    if (this.layoutCache?.key !== cacheKey)
+      this.layoutCache = { key: cacheKey, ...pianoLayout(w, s.minNote, s.maxNote) };
     const layout = this.layoutCache;
     const notes = Array.isArray(s.notes) ? s.notes : [];
     const active = new Map();
@@ -246,7 +334,8 @@ export class PianoRenderer {
     ctx.clearRect(0, 0, w, h);
     ctx.globalAlpha = clamp(finite(s.opacity, 1), 0, 1);
     ctx.globalCompositeOperation = 'source-over';
-    if (s.background !== 'transparent') this.drawBackground(ctx, w, h, strike, theme, s.grid !== false);
+    if (s.background !== 'transparent')
+      this.drawBackground(ctx, w, h, strike, theme, s.grid !== false);
 
     for (const note of notes) {
       const k = layout.byNote.get(note.note);
@@ -256,16 +345,33 @@ export class PianoRenderer {
         const current = active.get(note.note);
         if (!current || current.velocity < note.velocity) active.set(note.note, note);
       }
-      if (down ? end < t || note.start > t + seconds + 0.2 : note.start > t || end < t - seconds - 0.2) continue;
+      if (
+        down ? end < t || note.start > t + seconds + 0.2 : note.start > t || end < t - seconds - 0.2
+      )
+        continue;
       visible.push({ note, k, end });
     }
 
     ctx.save();
-    ctx.beginPath(); ctx.rect(0, 0, w, strike); ctx.clip();
-    for (const item of visible) this.drawNote(ctx, item, t, strike, speed, down, theme, glow, s.labels && layout.whiteWidth > 30);
+    ctx.beginPath();
+    ctx.rect(0, 0, w, strike);
+    ctx.clip();
+    for (const item of visible)
+      this.drawNote(
+        ctx,
+        item,
+        t,
+        strike,
+        speed,
+        down,
+        theme,
+        glow,
+        s.labels && layout.whiteWidth > 30,
+      );
     if (s.particles && glow > 0) this.drawParticles(ctx, active, layout, t, strike, theme, glow);
     ctx.restore();
-    if (s.keyboard) this.drawKeyboard(ctx, layout, active, strike, keyboardHeight, theme, glow, s.labels, t);
+    if (s.keyboard)
+      this.drawKeyboard(ctx, layout, active, strike, keyboardHeight, theme, glow, s.labels, t);
     this.drawStrike(ctx, w, strike, active, layout, theme, glow);
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
@@ -274,16 +380,25 @@ export class PianoRenderer {
 
   drawBackground(ctx, w, h, strike, theme, grid) {
     const gradient = ctx.createLinearGradient(0, 0, 0, h);
-    gradient.addColorStop(0, '#080c14'); gradient.addColorStop(0.7, '#0b111b'); gradient.addColorStop(1, '#101922');
-    ctx.fillStyle = gradient; ctx.fillRect(0, 0, w, h);
+    gradient.addColorStop(0, '#080c14');
+    gradient.addColorStop(0.7, '#0b111b');
+    gradient.addColorStop(1, '#101922');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h);
     const aura = ctx.createRadialGradient(w * 0.5, strike, 0, w * 0.5, strike, w * 0.65);
-    aura.addColorStop(0, color(theme.low, 0.08)); aura.addColorStop(1, color(theme.low, 0));
-    ctx.fillStyle = aura; ctx.fillRect(0, 0, w, h);
+    aura.addColorStop(0, color(theme.low, 0.08));
+    aura.addColorStop(1, color(theme.low, 0));
+    ctx.fillStyle = aura;
+    ctx.fillRect(0, 0, w, h);
     if (!grid) return;
-    ctx.strokeStyle = 'rgba(184,205,228,0.032)'; ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(184,205,228,0.032)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
     for (const key of this.layoutCache.keys) {
-      if (key.note % 12 === 0) { ctx.moveTo(Math.round(key.x) + 0.5, 0); ctx.lineTo(Math.round(key.x) + 0.5, strike); }
+      if (key.note % 12 === 0) {
+        ctx.moveTo(Math.round(key.x) + 0.5, 0);
+        ctx.lineTo(Math.round(key.x) + 0.5, strike);
+      }
     }
     ctx.stroke();
   }
@@ -301,30 +416,47 @@ export class PianoRenderer {
     const height = bottom - top;
     if (height <= 0) return;
     const base = k.black ? theme.secondary : theme.main;
-    const fade = down ? 1 : clamp(1 - Math.max(0, strike - bottom) / Math.max(strike, 1) * 0.85, 0.12, 1);
+    const fade = down
+      ? 1
+      : clamp(1 - (Math.max(0, strike - bottom) / Math.max(strike, 1)) * 0.85, 0.12, 1);
     ctx.save();
     ctx.globalAlpha *= fade * (0.52 + velocity * 0.48);
-    if (glow > 0) { ctx.shadowBlur = (sounding ? 18 : 9) * glow; ctx.shadowColor = color(base, sounding ? 0.75 : 0.4); }
+    if (glow > 0) {
+      ctx.shadowBlur = (sounding ? 18 : 9) * glow;
+      ctx.shadowColor = color(base, sounding ? 0.75 : 0.4);
+    }
     const body = ctx.createLinearGradient(x, 0, x + width, 0);
-    body.addColorStop(0, color(base, 0.7)); body.addColorStop(0.3, color(theme.high, 0.95)); body.addColorStop(0.75, color(base, 0.95)); body.addColorStop(1, color(base, 0.65));
+    body.addColorStop(0, color(base, 0.7));
+    body.addColorStop(0.3, color(theme.high, 0.95));
+    body.addColorStop(0.75, color(base, 0.95));
+    body.addColorStop(1, color(base, 0.65));
     ctx.fillStyle = body;
-    rounded(ctx, x, top, width, height, Math.min(width * 0.2, 5)); ctx.fill();
+    rounded(ctx, x, top, width, height, Math.min(width * 0.2, 5));
+    ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = color(theme.high, 0.42); ctx.lineWidth = 0.65; ctx.stroke();
+    ctx.strokeStyle = color(theme.high, 0.42);
+    ctx.lineWidth = 0.65;
+    ctx.stroke();
     if (width > 8 && height > 9) {
       ctx.fillStyle = color(theme.high, 0.35);
-      rounded(ctx, x + 2, top + 2, Math.max(1, width * 0.12), height - 4, 1); ctx.fill();
+      rounded(ctx, x + 2, top + 2, Math.max(1, width * 0.12), height - 4, 1);
+      ctx.fill();
     }
     // A thin seam keeps pedal extension distinguishable from a physically held key.
     if (Number.isFinite(note.release) && note.release > note.start && note.release < end) {
-      const releaseY = down ? strike - (note.release - t) * speed : strike - (t - note.release) * speed;
+      const releaseY = down
+        ? strike - (note.release - t) * speed
+        : strike - (t - note.release) * speed;
       if (releaseY > top + 2 && releaseY < bottom - 2) {
-        ctx.fillStyle = 'rgba(9,16,24,0.35)'; ctx.fillRect(x + 1, releaseY, width - 2, 1);
+        ctx.fillStyle = 'rgba(9,16,24,0.35)';
+        ctx.fillRect(x + 1, releaseY, width - 2, 1);
       }
     }
     if (labels && height > 28 && width > 22) {
-      ctx.fillStyle = 'rgba(9,26,35,0.65)'; ctx.font = `600 ${Math.min(12, width * 0.35)}px "Segoe UI",sans-serif`;
-      ctx.textAlign = 'center'; ctx.fillText(noteName(note.note), k.center, Math.min(bottom - 7, top + 17));
+      ctx.fillStyle = 'rgba(9,26,35,0.65)';
+      ctx.font = `600 ${Math.min(12, width * 0.35)}px "Segoe UI",sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(noteName(note.note), k.center, Math.min(bottom - 7, top + 17));
     }
     ctx.restore();
   }
@@ -339,7 +471,7 @@ export class PianoRenderer {
       const velocity = clamp(note.velocity / 127, 0.1, 1);
       const count = Math.floor(7 + velocity * 9);
       for (let i = 0; i < count && emitted < 480; i++, emitted++) {
-        const age = ((t * (0.72 + velocity * 0.18) + i * 0.618033 + pitch * 0.013) % 1 + 1) % 1;
+        const age = (((t * (0.72 + velocity * 0.18) + i * 0.618033 + pitch * 0.013) % 1) + 1) % 1;
         if (age > Math.max(0, t - note.start) * 1.5 + 0.05) continue;
         const seed = Math.sin(pitch * 32.12 + i * 71.7) * 43758.5453;
         const random = seed - Math.floor(seed);
@@ -349,7 +481,9 @@ export class PianoRenderer {
         const alpha = (1 - age) ** 2 * glow * (0.5 + velocity * 0.5);
         const radius = 0.55 + random * 1.35;
         ctx.fillStyle = color(i % 3 ? theme.main : theme.high, alpha);
-        ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
     ctx.restore();
@@ -358,7 +492,8 @@ export class PianoRenderer {
   drawKeyboard(ctx, layout, active, y, height, theme, glow, labels, time) {
     const keys = layout.keys;
     ctx.save();
-    ctx.fillStyle = '#05090e'; ctx.fillRect(0, y, this.width, height);
+    ctx.fillStyle = '#05090e';
+    ctx.fillRect(0, y, this.width, height);
     for (const black of [false, true]) {
       for (const k of keys) {
         if (k.black !== black) continue;
@@ -374,24 +509,36 @@ export class PianoRenderer {
           surface.addColorStop(0, note ? color(theme.low, 1) : '#17222d');
           surface.addColorStop(0.84, note ? color(theme.main, 0.8) : '#0a111a');
           surface.addColorStop(1, note ? color(theme.low, 1) : '#1c2834');
-          ctx.shadowColor = 'rgba(0,0,0,0.65)'; ctx.shadowBlur = 5; ctx.shadowOffsetY = 3;
+          ctx.shadowColor = 'rgba(0,0,0,0.65)';
+          ctx.shadowBlur = 5;
+          ctx.shadowOffsetY = 3;
         } else {
           surface.addColorStop(0, note ? color(theme.main, 0.75 + amount * 0.25) : '#acb9c5');
           surface.addColorStop(0.14, note ? color(theme.high, 0.9) : '#e6ecf0');
           surface.addColorStop(0.88, note ? color(theme.main, 0.9) : '#ccd6df');
           surface.addColorStop(1, note ? color(theme.low, 1) : '#8799a9');
-          ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetY = 0;
         }
-        ctx.fillStyle = surface; rounded(ctx, x, y + 1, kw, kh, black ? 3 : 2); ctx.fill();
-        ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-        ctx.strokeStyle = black ? 'rgba(188,218,239,0.13)' : 'rgba(248,253,255,0.42)'; ctx.lineWidth = 0.7; ctx.stroke();
+        ctx.fillStyle = surface;
+        rounded(ctx, x, y + 1, kw, kh, black ? 3 : 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.strokeStyle = black ? 'rgba(188,218,239,0.13)' : 'rgba(248,253,255,0.42)';
+        ctx.lineWidth = 0.7;
+        ctx.stroke();
         if (note && glow > 0) {
           const sheen = ctx.createLinearGradient(0, y, 0, y + kh);
-          sheen.addColorStop(0, color(theme.high, amount * 0.75)); sheen.addColorStop(0.6, color(theme.main, 0));
-          ctx.fillStyle = sheen; ctx.fillRect(x + 1, y + 1, Math.max(0, kw - 2), kh - 2);
+          sheen.addColorStop(0, color(theme.high, amount * 0.75));
+          sheen.addColorStop(0.6, color(theme.main, 0));
+          ctx.fillStyle = sheen;
+          ctx.fillRect(x + 1, y + 1, Math.max(0, kw - 2), kh - 2);
         }
         if (labels && !black && k.note % 12 === 0 && kw > 10 && height > 36) {
-          ctx.fillStyle = 'rgba(24,41,58,0.58)'; ctx.textAlign = 'center'; ctx.font = `500 ${clamp(kw * 0.35, 8, 12)}px "Segoe UI",sans-serif`;
+          ctx.fillStyle = 'rgba(24,41,58,0.58)';
+          ctx.textAlign = 'center';
+          ctx.font = `500 ${clamp(kw * 0.35, 8, 12)}px "Segoe UI",sans-serif`;
           ctx.fillText(noteName(k.note), k.center, y + kh - 12);
         }
       }
@@ -401,18 +548,27 @@ export class PianoRenderer {
 
   drawStrike(ctx, width, y, active, layout, theme, glow) {
     ctx.save();
-    ctx.strokeStyle = color(theme.main, 0.25 + glow * 0.15); ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(width, y + 0.5); ctx.stroke();
+    ctx.strokeStyle = color(theme.main, 0.25 + glow * 0.15);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(width, y + 0.5);
+    ctx.stroke();
     for (const [pitch, note] of active) {
       const k = layout.byNote.get(pitch);
       const radius = Math.max(12, k.width * 1.3) * (0.8 + glow * 0.5);
       const spot = ctx.createRadialGradient(k.center, y, 0, k.center, y, radius);
-      spot.addColorStop(0, color(theme.high, 0.75 * glow)); spot.addColorStop(0.18, color(theme.main, 0.32 * glow)); spot.addColorStop(1, color(theme.main, 0));
-      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = spot;
+      spot.addColorStop(0, color(theme.high, 0.75 * glow));
+      spot.addColorStop(0.18, color(theme.main, 0.32 * glow));
+      spot.addColorStop(1, color(theme.main, 0));
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = spot;
       ctx.fillRect(k.center - radius, y - radius, radius * 2, radius * 2);
-      ctx.shadowBlur = 10 * glow; ctx.shadowColor = color(theme.main, 1);
-      ctx.fillStyle = color(theme.high, 0.55 + note.velocity / 127 * 0.45);
-      rounded(ctx, k.center - k.width * 0.42, y - 1, k.width * 0.84, 2.5, 1); ctx.fill();
+      ctx.shadowBlur = 10 * glow;
+      ctx.shadowColor = color(theme.main, 1);
+      ctx.fillStyle = color(theme.high, 0.55 + (note.velocity / 127) * 0.45);
+      rounded(ctx, k.center - k.width * 0.42, y - 1, k.width * 0.84, 2.5, 1);
+      ctx.fill();
     }
     ctx.restore();
   }

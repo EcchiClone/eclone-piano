@@ -1,5 +1,7 @@
 # Windows MIDI bridge
 
+MIDI event packets additionally include `qpcTimestamp`, the absolute QueryPerformanceCounter time in milliseconds captured on the native callback thread. This shares the Windows monotonic clock with the process audio recorder and Node `process.hrtime`, so pipe delivery delays do not shift saved performance timing. The original `timestamp` remains bridge-relative milliseconds.
+
 Uses the Windows `winmm.dll` MIDI API through C# compiled in memory by the built-in Windows PowerShell. No Python, npm native addon, compiler installation, administrator rights, or custom MIDI driver is needed to **read an already available input**. A virtual cable such as loopMIDI is still needed to route MIDI between Kontakt standalone and this application when no suitable virtual port exists.
 
 Run from Node with `spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], { windowsHide: true })`. Keep stdin open; closing stdin exits the bridge and releases devices. Only UTF-8 newline-delimited JSON is written to stdout. All device access runs inside this child process, not Electron's renderer.

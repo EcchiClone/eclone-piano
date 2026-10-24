@@ -1,0 +1,293 @@
+import { chromium } from '@playwright/test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { startServer } from '../server/index.js';
+
+// This test uses its own generated tone + MIDI fixture and its own local server.
+// It never records Kontakt, opens a MIDI input, or uses the user's browser session.
+const exec = promisify(execFile);
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const id = 'export-smoke-' + randomUUID();
+const recordingRoot = path.join(root, 'recordings');
+const prefix = path.join(recordingRoot, id);
+const duration = 2.4;
+const onset = 0.35;
+const rate = 48000;
+const frames = Math.round(duration * rate);
+const wav = Buffer.alloc(44 + frames * 4);
+wav.write('RIFF', 0);
+wav.writeUInt32LE(wav.length - 8, 4);
+wav.write('WAVEfmt ', 8);
+wav.writeUInt32LE(16, 16);
+wav.writeUInt16LE(1, 20);
+wav.writeUInt16LE(2, 22);
+wav.writeUInt32LE(rate, 24);
+wav.writeUInt32LE(rate * 4, 28);
+wav.writeUInt16LE(4, 32);
+wav.writeUInt16LE(16, 34);
+wav.write('data', 36);
+wav.writeUInt32LE(frames * 4, 40);
+for (let i = 0; i < frames; i++) {
+  const t = i / rate;
+  const envelope = t < onset || t > 1.85 ? 0 : Math.min(1, (t - onset) / 0.01, (1.85 - t) / 0.02);
+  const sample = Math.round(Math.sin(2 * Math.PI * 440 * t) * envelope * 0.25 * 32767);
+  wav.writeInt16LE(sample, 44 + i * 4);
+  wav.writeInt16LE(sample, 46 + i * 4);
+}
+const session = {
+  id,
+  version: 1,
+  name: 'Generated export smoke fixture',
+  createdAt: new Date().toISOString(),
+  duration,
+  hasAudio: true,
+  events: [
+    { t: onset, data: [144, 69, 100] },
+    { t: 1.85, data: [128, 69, 0] },
+  ],
+};
+
+let server, browser;
+const report = { id, inputDuration: duration, errors: [] };
+try {
+  await fs.mkdir(recordingRoot, { recursive: true });
+  await fs.mkdir(path.join(root, '.runtime'), { recursive: true });
+  await fs.writeFile(prefix + '.wav', wav);
+  await fs.writeFile(prefix + '.session.json', JSON.stringify(session));
+  const silentId = id + '-silent';
+  await fs.writeFile(
+    path.join(recordingRoot, silentId + '.session.json'),
+    JSON.stringify({
+      ...session,
+      id: silentId,
+      name: 'Generated MIDI-only export fixture',
+      duration: 0.8,
+      hasAudio: false,
+      events: [
+        { t: 0.1, data: [144, 60, 100] },
+        { t: 0.5, data: [128, 60, 0] },
+      ],
+    }),
+  );
+  const port = Number(process.env.LUMA_EXPORT_TEST_PORT || 3219);
+  server = await startServer({ port });
+  const base = `http://127.0.0.1:${port}`;
+  const post = async (route, body, headers = {}) =>
+    fetch(base + route, { method: 'POST', body, headers });
+  const starts = await Promise.all(
+    Array.from({ length: 5 }, () =>
+      post('/api/export/start', JSON.stringify({ sessionId: id }), {
+        'Content-Type': 'application/json',
+      }),
+    ),
+  );
+  assert.equal(
+    starts.filter((response) => response.ok).length,
+    3,
+    'Concurrent start requests must respect the three-upload limit.',
+  );
+  const uploads = await Promise.all(
+    starts.filter((response) => response.ok).map((response) => response.json()),
+  );
+  const probeUpload = uploads[0].uploadId;
+  assert.equal(
+    (
+      await post('/api/export/chunk/' + probeUpload, Buffer.from('test'), {
+        'X-Export-Sequence': '1',
+      })
+    ).status,
+    400,
+  );
+  assert.ok(
+    (
+      await post('/api/export/chunk/' + probeUpload, Buffer.from('test'), {
+        'X-Export-Sequence': '0',
+      })
+    ).ok,
+  );
+  for (const upload of uploads) assert.ok((await post('/api/export/cancel/' + upload.uploadId)).ok);
+  await assert.rejects(fs.stat(`${prefix}-${probeUpload}.webm`), { code: 'ENOENT' });
+  report.uploadProtocol = 'concurrency, sequence and cancellation passed';
+  browser = await chromium.launch({
+    executablePath:
+      process.env.LUMA_TEST_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    headless: true,
+    args: ['--autoplay-policy=no-user-gesture-required'],
+  });
+  // HiDPI is intentional: exports must be 1080p regardless of Windows scaling.
+  const page = await browser.newPage({
+    viewport: { width: 1280, height: 900 },
+    deviceScaleFactor: 2,
+  });
+  page.on('pageerror', (error) => report.errors.push(error.message));
+  await page.addInitScript(() => {
+    const capture = HTMLCanvasElement.prototype.captureStream;
+    HTMLCanvasElement.prototype.captureStream = function (...args) {
+      window.exportCaptureDimensions = { width: this.width, height: this.height, fps: args[0] };
+      return capture.apply(this, args);
+    };
+  });
+  await page.goto(base);
+  await page.waitForFunction(() => window.lumaDiagnostics()?.mode === 'live');
+  await page.locator(`[data-export="${id}"]`).click();
+  await page.waitForFunction(() => !document.getElementById('exportDownload').hidden, null, {
+    timeout: 90000,
+  });
+  report.capture = await page.evaluate(() => window.exportCaptureDimensions);
+  report.resultUrl = await page.locator('#exportDownload').getAttribute('href');
+  report.exportStatus = await page.locator('#exportStatus').innerText();
+  assert.ok(report.resultUrl.endsWith('.mp4'), 'Expected local FFmpeg to create MP4.');
+  const outputPath = path.join(recordingRoot, path.basename(report.resultUrl));
+  const { stdout } = await exec(
+    'ffprobe',
+    ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', outputPath],
+    { maxBuffer: 1024 * 1024 },
+  );
+  const metadata = JSON.parse(stdout);
+  const video = metadata.streams.find((stream) => stream.codec_type === 'video');
+  const audio = metadata.streams.find((stream) => stream.codec_type === 'audio');
+  report.video = video && {
+    width: video.width,
+    height: video.height,
+    codec: video.codec_name,
+    frameRate: video.avg_frame_rate,
+    duration: video.duration,
+  };
+  report.audio = audio && {
+    codec: audio.codec_name,
+    sampleRate: audio.sample_rate,
+    channels: audio.channels,
+    duration: audio.duration,
+  };
+  assert.ok(video && audio, 'MP4 must contain video and original audio.');
+  assert.equal(video.avg_frame_rate, '60/1', 'MP4 must use a stable 60 fps editing timeline.');
+  assert.ok(
+    Math.abs(Number(video.duration) - duration) < 0.05,
+    'Video track must cover the whole performance.',
+  );
+  assert.ok(
+    Math.abs(Number(audio.duration) - duration) < 0.05,
+    'Audio track must cover the whole performance.',
+  );
+  const { stdout: pcm } = await exec(
+    'ffmpeg',
+    ['-v', 'error', '-i', outputPath, '-vn', '-ac', '1', '-ar', '48000', '-f', 'f32le', 'pipe:1'],
+    { encoding: 'buffer', maxBuffer: 4 * 1024 * 1024 },
+  );
+  let sum = 0,
+    peak = 0,
+    firstSound = null;
+  for (let i = 0; i + 4 <= pcm.length; i += 4) {
+    const value = pcm.readFloatLE(i);
+    sum += value * value;
+    peak = Math.max(peak, Math.abs(value));
+    if (firstSound === null && Math.abs(value) > 0.02) firstSound = i / 4 / rate;
+  }
+  report.audioAnalysis = {
+    rms: Math.sqrt(sum / (pcm.length / 4)),
+    peak,
+    firstSound,
+    expectedOnset: onset,
+  };
+  assert.ok(report.audioAnalysis.rms > 0.05, 'Exported original audio must not be silent.');
+  assert.ok(
+    Math.abs(firstSound - onset) < 0.15,
+    'Audio onset must stay aligned with the MIDI timeline.',
+  );
+  assert.ok(
+    Math.abs(Number(metadata.format.duration) - duration) < 0.4,
+    'Export duration must match the performance.',
+  );
+  report.remainingOffscreenCanvases = await page.locator('body > canvas').count();
+  assert.equal(report.remainingOffscreenCanvases, 0, 'Export must release its offscreen canvas.');
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(
+    report.capture,
+    { width: 1920, height: 1080, fps: 60 },
+    'Windows display scaling must not change export dimensions.',
+  );
+  assert.equal(video.width, 1920);
+  assert.equal(video.height, 1080);
+
+  // A second export creates a distinct file and can be cancelled after chunking.
+  await page.locator('#cancelExport').click();
+  const startResponse = page.waitForResponse(
+    (response) => response.url().endsWith('/api/export/start') && response.ok(),
+  );
+  await page.locator(`[data-export="${id}"]`).click();
+  const cancelUpload = (await (await startResponse).json()).uploadId;
+  await page.waitForResponse(
+    (response) => response.url().endsWith('/api/export/chunk/' + cancelUpload) && response.ok(),
+  );
+  await page.locator('#cancelExport').click();
+  await page.waitForFunction(
+    () =>
+      !document.getElementById('exportDialog').open &&
+      document.querySelectorAll('body > canvas').length === 0,
+  );
+  await assert.rejects(fs.stat(`${prefix}-${cancelUpload}.webm`), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(`${prefix}-${cancelUpload}.mp4`), { code: 'ENOENT' });
+  assert.ok(
+    (await fs.stat(outputPath)).size > 0,
+    'Cancelling a new export must preserve the prior completed video.',
+  );
+  report.cancelledExportCleaned = true;
+
+  await page.locator(`[data-export="${silentId}"]`).click();
+  await page.waitForFunction(() => !document.getElementById('exportDownload').hidden, null, {
+    timeout: 90000,
+  });
+  const silentUrl = await page.locator('#exportDownload').getAttribute('href');
+  assert.ok(silentUrl.endsWith('.mp4'), 'MIDI-only recordings must also export as MP4.');
+  const { stdout: silentProbe } = await exec('ffprobe', [
+    '-v',
+    'error',
+    '-show_streams',
+    '-of',
+    'json',
+    path.join(recordingRoot, path.basename(silentUrl)),
+  ]);
+  const silentStreams = JSON.parse(silentProbe).streams;
+  assert.equal(silentStreams.length, 1);
+  assert.equal(silentStreams[0].codec_type, 'video');
+  assert.equal(silentStreams[0].avg_frame_rate, '60/1');
+  assert.ok(Math.abs(Number(silentStreams[0].duration) - 0.8) < 0.05);
+  report.midiOnlyExport = '1080p60 MP4, correct duration, no fake audio track';
+
+  const shutdownUpload = await (
+    await post('/api/export/start', JSON.stringify({ sessionId: id }), {
+      'Content-Type': 'application/json',
+    })
+  ).json();
+  assert.ok(
+    (
+      await post('/api/export/chunk/' + shutdownUpload.uploadId, Buffer.from('partial'), {
+        'X-Export-Sequence': '0',
+      })
+    ).ok,
+  );
+  await browser.close();
+  browser = null;
+  await server.close();
+  server = null;
+  await assert.rejects(fs.stat(`${prefix}-${shutdownUpload.uploadId}.webm`), { code: 'ENOENT' });
+  report.shutdownCleanedPartial = true;
+  console.log(JSON.stringify(report, null, 2));
+} finally {
+  await fs.writeFile(
+    path.join(root, '.runtime', 'export-report.json'),
+    JSON.stringify(report, null, 2),
+  );
+  await browser?.close();
+  await server?.close();
+  // These exact fixture files were created by this run; never remove user takes.
+  for (const filename of await fs.readdir(recordingRoot)) {
+    if (filename.startsWith(id + '.') || filename.startsWith(id + '-'))
+      await fs.unlink(path.join(recordingRoot, filename)).catch(() => {});
+  }
+}
