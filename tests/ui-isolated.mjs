@@ -8,6 +8,7 @@ const dataDir = await fs.mkdtemp(path.join(runtime, 'ui-data-'));
 const server = await startServer({ port: 3221, dataDir });
 try {
   process.env.LUMA_TEST_URL = 'http://127.0.0.1:3221';
+  process.env.LUMA_UI_ISOLATED = '1';
   await import('./ui-smoke.mjs');
 } finally {
   await server.close();

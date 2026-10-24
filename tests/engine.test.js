@@ -46,6 +46,49 @@ test('repeated pitch keeps distinct lifetimes and matches offs FIFO', () => {
   assert.equal(p.held.size, 0);
 });
 
+test('piano retrigger policy recovers a missing key-up without changing raw MIDI or pedal tails', () => {
+  const events = [
+    { t: 0, data: [187, 64, 127] },
+    { t: 1, data: [155, 60, 64] },
+    // A missing first key-up must not leave a second physically held instance forever.
+    { t: 2, data: [155, 60, 96] },
+    { t: 3, data: [155, 60, 0] },
+    { t: 4, data: [187, 64, 0] },
+  ];
+  const p = new Performance({ notePolicy: 'piano' });
+  for (const event of events) p.ingest(event);
+  assert.equal(p.notes.length, 2);
+  assert.equal(p.notes[0].release, 2);
+  assert.equal(p.notes[1].release, 3);
+  assert.equal(p.notes[0].end, 4);
+  assert.equal(p.notes[1].end, 4);
+  assert.equal(p.activeAt(3.5).length, 2);
+  assert.equal(p.activeAt(3.5, true).length, 0);
+  assert.equal(p.activeAt(4).length, 0);
+  assert.equal(p.retriggerRecoveries, 1);
+  assert.deepEqual(p.events, events);
+  const restored = Performance.fromJSON(JSON.parse(JSON.stringify(p)));
+  assert.equal(restored.notePolicy, 'piano');
+  assert.deepEqual(restored.notes, p.notes);
+});
+
+test('piano policy preserves arbitrarily long valid keys and pedal tails across channels', () => {
+  const p = new Performance({ notePolicy: 'piano' });
+  p.ingest({ t: 0, data: [144, 60, 80] });
+  p.ingest({ t: 0, data: [177, 64, 127] });
+  p.ingest({ t: 0, data: [145, 60, 80] });
+  p.ingest({ t: 1, data: [129, 60, 0] });
+  p.ingest({ t: 3600, data: [176, 1, 10] });
+  p.prune(3580, { events: true });
+  assert.equal(p.activeAt(3600).length, 2);
+  assert.equal(p.activeAt(3600, true).length, 1);
+  assert.equal(p.retriggerRecoveries, 0);
+  p.ingest({ t: 3601, data: [177, 64, 0] });
+  assert.equal(p.activeAt(3601).length, 1);
+  p.ingest({ t: 3602, data: [128, 60, 0] });
+  assert.equal(p.activeAt(3602).length, 0);
+});
+
 test('All Notes Off honors sustain while All Sound Off immediately silences its channel', () => {
   const p = new Performance();
   p.ingest({ t: 0, data: [0xb0, 64, 127] });

@@ -710,6 +710,22 @@ input::placeholder {
   background: #1b3530;
   border: 1px solid #35564a;
 }
+.session-actions .delete-button {
+  color: #d99ca3;
+  border-color: #603d49;
+  background: transparent;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 25px;
+}
+.button.danger {
+  background: #c56674;
+  border-color: #c56674;
+  color: #fff;
+}
 .settings-panel {
   border: 1px solid #273640;
   border-radius: 9px;

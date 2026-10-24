@@ -86,7 +86,8 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     connectionSave = Promise.resolve(),
     settingsSave = Promise.resolve(),
     settingsRevision = 0,
-    lastMidiReset = -Infinity;
+    lastMidiReset = -Infinity,
+    lastMidiResetQpc = -Infinity;
   try {
     const saved = JSON.parse(await fs.readFile(path.join(DATA, 'connection.json'), 'utf8'));
     if (
@@ -113,7 +114,8 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
   const controllers = new Map(),
     historyControllers = new Map(),
     history = [];
-  const livePerformance = new MidiPerformance();
+  const livePerformance = new MidiPerformance({ notePolicy: 'piano' });
+  const midiRecoveries = [];
   const clients = new Set();
   const broadcast = (msg) => {
     const data = JSON.stringify(msg);
@@ -127,6 +129,15 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     midiStatus,
     midiCount,
     lastMidi,
+    notePolicy: livePerformance.notePolicy,
+    midiDiagnostics: {
+      heldKeys: livePerformance.held.size,
+      soundingVoices: livePerformance.activeAt(now()).length,
+      sustainChannels: livePerformance.pedals.flatMap((down, channel) =>
+        down ? [channel + 1] : [],
+      ),
+      retriggerRecoveries: livePerformance.retriggerRecoveries,
+    },
     recording: recording
       ? {
           id: recording.id,
@@ -162,7 +173,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     for (const note of livePerformance.notes) {
       if (note.start >= boundary || note.end <= boundary) continue;
       events.push({ t: boundary, data: [144 + note.channel, note.note, note.velocity] });
-      if (note.release <= boundary)
+      if (note.release < boundary)
         events.push({ t: boundary, data: [128 + note.channel, note.note, 0] });
     }
     events.push(...history.filter((event) => event.t >= boundary));
@@ -184,7 +195,18 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       midiCount++;
       lastMidi = { data, t };
     }
+    const recoveriesBefore = livePerformance.retriggerRecoveries;
     livePerformance.ingest(event);
+    if (livePerformance.retriggerRecoveries !== recoveriesBefore) {
+      midiRecoveries.push({
+        type: 'piano-retrigger',
+        t,
+        channel: (data[0] & 15) + 1,
+        note: data[1],
+        context: [...history.slice(-16), event],
+      });
+      if (midiRecoveries.length > 32) midiRecoveries.shift();
+    }
     updateControllers(controllers, data);
     history.push(event);
     while (history.length && history[0].t < t - 20)
@@ -196,6 +218,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
   function resetMidi() {
     const t = now();
     lastMidiReset = t;
+    lastMidiResetQpc = Number(process.hrtime.bigint()) / 1e6;
     for (let channel = 0; channel < 16; channel++) {
       acceptMidi([176 + channel, 64, 0], t, false);
       acceptMidi([176 + channel, 120, 0], t, false);
@@ -269,6 +292,9 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         publish();
       }
       if (msg.type === 'midi') {
+        // Even a pipe backlog outside our 30-second clock-conversion window must
+        // not resurrect notes that were physically played before an explicit reset.
+        if (Number.isFinite(msg.qpcTimestamp) && msg.qpcTimestamp < lastMidiResetQpc) return;
         const received = now(),
           elapsed = (Number(process.hrtime.bigint()) / 1e6 - msg.qpcTimestamp) / 1000;
         acceptMidi(
@@ -349,10 +375,25 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
             '녹음 WAV 파일이 없거나 완전하지 않습니다. MIDI 연주는 계속 재생할 수 있습니다.',
         };
   }
+  const deletingSessions = new Set(),
+    activeTakeIds = new Set(),
+    sessionReaders = new Map();
+  const sessionConflict = (message) => Object.assign(new Error(message), { statusCode: 409 });
+  function retainSession(id) {
+    id = String(id).toLowerCase();
+    if (deletingSessions.has(id)) throw sessionConflict('이 연주를 삭제 중입니다.');
+    sessionReaders.set(id, (sessionReaders.get(id) || 0) + 1);
+    return () => {
+      const remaining = sessionReaders.get(id) - 1;
+      if (remaining) sessionReaders.set(id, remaining);
+      else sessionReaders.delete(id);
+    };
+  }
   const sessions = async () => {
     const entries = await fs.readdir(DATA);
     const list = [];
     for (const entry of entries.filter((n) => /^[\w-]+\.session\.json$/.test(n))) {
+      if (deletingSessions.has(entry.slice(0, -'.session.json'.length))) continue;
       try {
         const d = await reconcileSessionAudio(
           JSON.parse(await fs.readFile(path.join(DATA, entry), 'utf8')),
@@ -373,10 +414,109 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
   const getSession = async (id) => {
     if (id === 'demo') return demo;
     if (!/^[\w-]+$/.test(id)) throw new Error('올바르지 않은 세션입니다.');
-    return reconcileSessionAudio(
-      JSON.parse(await fs.readFile(path.join(DATA, id + '.session.json'), 'utf8')),
-    );
+    const release = retainSession(id);
+    try {
+      return await reconcileSessionAudio(
+        JSON.parse(await fs.readFile(path.join(DATA, id + '.session.json'), 'utf8')),
+      );
+    } finally {
+      release();
+    }
   };
+  async function deleteSession(id) {
+    if (
+      typeof id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    )
+      throw new Error('삭제할 수 있는 저장된 연주를 선택하세요.');
+    id = id.toLowerCase();
+    if (closing) throw sessionConflict('앱을 종료 중입니다.');
+    if (deletingSessions.has(id)) throw sessionConflict('이 연주를 이미 삭제 중입니다.');
+    if (activeTakeIds.has(id) || recording?.id === id || audio?.id === id)
+      throw sessionConflict('녹음하거나 저장 중인 연주는 삭제할 수 없습니다.');
+    if (
+      sessionReaders.has(id) ||
+      [...exportUploads.values()].some((upload) => upload.sessionId.toLowerCase() === id)
+    )
+      throw sessionConflict('연주를 불러오거나 영상을 내보내는 중입니다. 완료 후 삭제하세요.');
+    deletingSessions.add(id);
+    const moved = [];
+    let trashDirectory;
+    try {
+      const files = [];
+      // Only these exact source files belong to the take. Completed videos remain intact.
+      for (const extension of ['.session.json', '.wav', '.mid']) {
+        const filename = id + extension,
+          source = path.join(DATA, filename);
+        let stat;
+        try {
+          stat = await fs.lstat(source);
+        } catch (error) {
+          if (error.code === 'ENOENT' && extension !== '.session.json') continue;
+          throw error;
+        }
+        if (!stat.isFile() || stat.isSymbolicLink())
+          throw new Error('일반 연주 파일만 삭제할 수 있습니다.');
+        files.push({ filename, source });
+      }
+      const trashRoot = path.join(DATA, '.trash');
+      await fs.mkdir(trashRoot, { recursive: true });
+      const trashStat = await fs.lstat(trashRoot);
+      if (!trashStat.isDirectory() || trashStat.isSymbolicLink())
+        throw new Error('안전한 연주 보관함을 만들 수 없습니다.');
+      trashDirectory = await fs.mkdtemp(path.join(trashRoot, `${id}-${Date.now()}-`));
+      await fs.writeFile(
+        path.join(trashDirectory, 'manifest.json'),
+        JSON.stringify({
+          version: 1,
+          sessionId: id,
+          trashedAt: new Date().toISOString(),
+          files: files.map((file) => file.filename),
+        }),
+      );
+      for (const file of files) {
+        const destination = path.join(trashDirectory, file.filename);
+        await fs.rename(file.source, destination);
+        moved.push({ source: file.source, destination });
+      }
+      if (transport.sessionId?.toLowerCase() === id) {
+        transportDuration = 0;
+        transport = {
+          mode: 'live',
+          sessionId: null,
+          position: 0,
+          playing: false,
+          startedAt: now(),
+        };
+        publish();
+      }
+      broadcast({ type: 'deleted', sessionId: id });
+      return { deleted: true, id, trashed: true };
+    } catch (error) {
+      const rollbackErrors = [];
+      for (const file of moved.reverse()) {
+        try {
+          await fs.rename(file.destination, file.source);
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+      if (trashDirectory && !rollbackErrors.length) {
+        await fs.unlink(path.join(trashDirectory, 'manifest.json')).catch(() => {});
+        await fs.rmdir(trashDirectory).catch(() => {});
+      }
+      if (rollbackErrors.length)
+        throw Object.assign(
+          new Error(
+            '삭제를 완료하지 못했습니다. 일부 파일은 recordings/.trash 보관함에 안전하게 남아 있습니다.',
+          ),
+          { statusCode: 500 },
+        );
+      throw error;
+    } finally {
+      deletingSessions.delete(id);
+    }
+  }
   const helper = path.join(
     ROOT,
     'native-audio',
@@ -565,6 +705,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     publish();
     const id = randomUUID(),
       name = String(payload.name || `연주 ${new Date().toLocaleString('ko-KR')}`).slice(0, 120);
+    activeTakeIds.add(id);
     const requestedAt = now();
     let run;
     try {
@@ -599,6 +740,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         await stopCapture(run);
         if (audio === run) audio = null;
       }
+      activeTakeIds.delete(id);
       throw error;
     } finally {
       starting = false;
@@ -630,6 +772,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
             : undefined;
         const saved = {
           version: 1,
+          notePolicy: livePerformance.notePolicy,
           id: rec.id,
           name: rec.name,
           createdAt: rec.createdAt,
@@ -642,6 +785,10 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
                 peak: run.final.peak,
                 silent: run.final.silent,
                 discontinuities: run.final.discontinuities,
+                insertedGapFrames: run.final.insertedGapFrames,
+                clockResets: run.final.clockResets,
+                timestampErrors: run.final.timestampErrors,
+                maxClockDriftMs: run.final.maxClockDriftMs,
               }
             : undefined,
           events: rec.events,
@@ -653,6 +800,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         return saved;
       } finally {
         if (audio === run) audio = null;
+        activeTakeIds.delete(rec.id);
         stopping = false;
         stopTask = null;
         publish();
@@ -834,9 +982,23 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       const url = new URL(req.url, `http://127.0.0.1:${port}`),
         p = decodeURIComponent(url.pathname);
       if (p === '/api/state') return json(state());
+      if (p === '/api/midi-diagnostics')
+        return json({
+          serverTime: now(),
+          notePolicy: livePerformance.notePolicy,
+          ...state().midiDiagnostics,
+          recentEvents: history,
+          recoveries: midiRecoveries,
+        });
       if (p === '/api/sessions') return json(await sessions());
       if (p === '/api/audio') return json(await probeAudio());
-      if (p.startsWith('/api/session/')) return json(await getSession(p.slice(13)));
+      if (p.startsWith('/api/session/')) {
+        const id = p.slice(13);
+        if (req.method === 'DELETE') return json(await deleteSession(id));
+        if (req.method !== 'GET' && req.method !== 'HEAD')
+          return json({ error: 'Method not allowed' }, 405);
+        return json(await getSession(id));
+      }
       if (p.startsWith('/api/midi/')) {
         const session = await getSession(p.slice(10));
         res.writeHead(200, {
@@ -879,6 +1041,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
             version: 1,
             id,
             name: String(src.name || '가져온 연주').slice(0, 120),
+            notePolicy: src.notePolicy === 'piano' ? 'piano' : 'fifo',
             createdAt: new Date().toISOString(),
             duration: src.duration,
             events: src.events.sort((a, b) => a.t - b.t),
@@ -892,6 +1055,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         if (exportUploads.size + exportStarts >= 3)
           throw new Error('진행 중인 영상 내보내기를 먼저 마치거나 취소하세요.');
         exportStarts++;
+        let releaseSession;
         try {
           let body = '';
           for await (const chunk of req) {
@@ -901,6 +1065,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
           const { sessionId } = JSON.parse(body);
           if (typeof sessionId !== 'string' || sessionId === 'demo')
             throw new Error('저장된 연주를 선택하세요.');
+          releaseSession = retainSession(sessionId);
           const session = await getSession(sessionId),
             id = randomUUID(),
             stem = `${sessionId}-${id}`;
@@ -921,6 +1086,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
           exportUploads.set(id, upload);
           return json({ uploadId: id, maxBytes: maxExportBytes });
         } finally {
+          releaseSession?.();
           exportStarts--;
         }
       }
@@ -1075,7 +1241,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     } catch (e) {
       json(
         { error: e.code === 'ENOENT' ? '파일을 찾지 못했습니다.' : e.message },
-        e.code === 'ENOENT' ? 404 : 400,
+        e.code === 'ENOENT' ? 404 : [409, 500].includes(e.statusCode) ? e.statusCode : 400,
       );
     }
   });
@@ -1120,6 +1286,8 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     server.once('error', reject);
     server.listen(port, '127.0.0.1', resolve);
   });
+  // Let isolated tests request an OS-assigned port without risking a live service collision.
+  port = server.address().port;
   startBridge();
   const playbackClock = setInterval(() => {
     if (

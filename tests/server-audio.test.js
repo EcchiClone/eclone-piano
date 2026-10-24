@@ -112,6 +112,10 @@ childProcess.spawn = (command, args) => {
           peak: 0.3,
           silent: false,
           discontinuities: 0,
+          insertedGapFrames: 480,
+          clockResets: 2,
+          timestampErrors: 1,
+          maxClockDriftMs: 3.25,
         });
       }
       child.finish(current.finalize === false ? 1 : 0);
@@ -217,6 +221,18 @@ test('native level and finalized events retain the browser protocol event names'
     await client.wait((message) => message.type === 'audioFinal');
     const saved = await client.wait((message) => message.type === 'saved');
     assert.equal(saved.session.hasAudio, true);
+    const stored = JSON.parse(
+      await fsp.readFile(path.join(client.dataDir, saved.session.id + '.session.json'), 'utf8'),
+    );
+    for (const [key, value] of Object.entries({
+      insertedGapFrames: 480,
+      clockResets: 2,
+      timestampErrors: 1,
+      maxClockDriftMs: 3.25,
+    })) {
+      assert.equal(saved.session.audio[key], value);
+      assert.equal(stored.audio[key], value);
+    }
   } finally {
     await client.close();
   }

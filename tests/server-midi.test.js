@@ -13,13 +13,14 @@ import { Performance as MidiPerformance } from '../public/engine.js';
 const originalSpawn = childProcess.spawn;
 const originalPerformance = globalThis.performance;
 let milliseconds = 0,
+  frozenNow = null,
   latestBridge,
   initialInputs = [{ id: 0, name: 'Test MIDI' }],
   failOpen = false;
 // Advance only the server's musical clock; socket/event-loop timers stay real.
 globalThis.performance = new Proxy(originalPerformance, {
   get(target, key) {
-    if (key === 'now') return () => originalPerformance.now() + milliseconds;
+    if (key === 'now') return () => frozenNow ?? originalPerformance.now() + milliseconds;
     const value = Reflect.get(target, key, target);
     return typeof value === 'function' ? value.bind(target) : value;
   },
@@ -123,13 +124,14 @@ async function setup({
   rejectOpen = false,
 } = {}) {
   milliseconds = 0;
+  frozenNow = null;
   initialInputs = inputs;
   failOpen = rejectOpen;
   const dataDir = await fs.mkdtemp(path.join(tmpdir(), 'luma-server-midi-'));
   if (inputName)
     await fs.writeFile(path.join(dataDir, 'connection.json'), JSON.stringify({ inputName }));
-  const port = 35000 + Math.floor(Math.random() * 20000);
-  const app = await startServer({ port, dataDir });
+  const app = await startServer({ port: 0, dataDir });
+  const { port } = app;
   const bridge = latestBridge,
     client = await clientFor(port),
     clients = [client];
@@ -175,7 +177,7 @@ test.after(() => {
 });
 const windows = { skip: process.platform !== 'win32' };
 function liveFrom(hello) {
-  const model = new MidiPerformance();
+  const model = new MidiPerformance({ notePolicy: hello.notePolicy });
   for (const event of hello.history) model.ingest(event);
   return model;
 }
@@ -308,6 +310,57 @@ test(
       assert.equal(model.notes.find((note) => note.note === 60).release, 0);
     } finally {
       await s.close();
+    }
+  },
+);
+
+test(
+  'a key release exactly at the bootstrap boundary is emitted once for recording and reconnect',
+  windows,
+  async () => {
+    const s = await setup();
+    try {
+      frozenNow = originalPerformance.now() + 100000;
+      s.bridge.message({ type: 'midi', data: [187, 64, 127] });
+      s.bridge.message({ type: 'midi', data: [155, 60, 90] });
+      frozenNow += 1000;
+      const boundary = frozenNow;
+      s.bridge.message({ type: 'midi', data: [155, 60, 0] });
+      await s.record();
+      frozenNow += 1000;
+      const saved = await s.stop();
+      assert.deepEqual(
+        saved.events.map((event) => event.data),
+        [
+          [187, 64, 127],
+          [155, 60, 90],
+          [155, 60, 0],
+        ],
+      );
+      assert.ok(saved.events.every((event) => event.t === 0));
+      frozenNow = boundary + 20000;
+      const reconnect = await s.connect(true);
+      const hello = await reconnect.wait((message) => message.type === 'hello');
+      assert.equal(
+        hello.history.filter(
+          (event) =>
+            (event.data[0] & 240) === 128 || ((event.data[0] & 240) === 144 && event.data[2] === 0),
+        ).length,
+        1,
+      );
+      const restored = liveFrom(hello);
+      assert.equal(restored.activeAt(hello.serverTime).length, 1);
+      assert.equal(restored.activeAt(hello.serverTime, true).length, 0);
+      frozenNow += 1000;
+      s.bridge.message({ type: 'midi', data: [187, 64, 0] });
+      const pedalUp = await reconnect.wait(
+        (message) => message.type === 'midi' && message.data[1] === 64 && message.data[2] === 0,
+      );
+      restored.ingest(pedalUp);
+      assert.equal(restored.activeAt(pedalUp.t).length, 0);
+    } finally {
+      await s.close();
+      frozenNow = null;
     }
   },
 );
@@ -596,6 +649,7 @@ test('queued notes played before panic cannot resurrect a cleared keyboard', win
     s.client.send({ type: 'panic' });
     await s.client.wait((message) => message.type === 'panic');
     s.bridge.message({ type: 'midi', data: [144, 60, 100], qpcTimestamp: oldTimestamp });
+    s.bridge.message({ type: 'midi', data: [144, 64, 100], qpcTimestamp: oldTimestamp - 31000 });
     const reconnected = await s.connect(true),
       hello = await reconnected.wait((message) => message.type === 'hello');
     assert.equal(liveFrom(hello).activeAt(hello.serverTime).length, 0);
@@ -604,3 +658,126 @@ test('queued notes played before panic cannot resurrect a cleared keyboard', win
     await s.close();
   }
 });
+
+test(
+  'closing an overlay viewer during sustain does not lose key-up or pedal-up in studio or recording',
+  windows,
+  async () => {
+    const s = await setup();
+    try {
+      await s.record();
+      const overlay = await s.connect(true);
+      const overlayHello = await overlay.wait((message) => message.type === 'hello');
+      const studioLive = liveFrom(s.hello);
+      const overlayLive = liveFrom(overlayHello);
+      const onStudio = (bytes) => {
+        const event = JSON.parse(bytes);
+        if (event.type === 'midi') studioLive.ingest(event);
+      };
+      const onOverlay = (bytes) => {
+        const event = JSON.parse(bytes);
+        if (event.type === 'midi') overlayLive.ingest(event);
+      };
+      s.client.ws.on('message', onStudio);
+      overlay.ws.on('message', onOverlay);
+      s.bridge.message({ type: 'midi', data: [187, 64, 127] });
+      s.bridge.message({ type: 'midi', data: [155, 60, 90] });
+      s.bridge.message({ type: 'midi', data: [155, 60, 0] });
+      await overlay.wait(
+        (message) => message.type === 'midi' && message.data[0] === 155 && message.data[2] === 0,
+      );
+      assert.equal(studioLive.activeAt(s.app.state().serverTime).length, 1);
+      assert.equal(overlayLive.activeAt(s.app.state().serverTime).length, 1);
+      await new Promise((resolve) => {
+        overlay.ws.once('close', resolve);
+        overlay.ws.close();
+      });
+      // Closing a viewer must not silence a correctly held pedal tail, or modify the take.
+      assert.equal(studioLive.activeAt(s.app.state().serverTime).length, 1);
+      s.bridge.message({ type: 'midi', data: [187, 64, 0] });
+      await s.client.wait(
+        (message) => message.type === 'midi' && message.data[0] === 187 && message.data[2] === 0,
+      );
+      assert.equal(studioLive.activeAt(s.app.state().serverTime).length, 0);
+      const saved = await s.stop();
+      assert.deepEqual(
+        saved.events.map((event) => event.data),
+        [
+          [187, 64, 127],
+          [155, 60, 90],
+          [155, 60, 0],
+          [187, 64, 0],
+        ],
+      );
+      const restored = MidiPerformance.fromJSON(saved);
+      assert.ok(restored.notes[0].release < restored.notes[0].end);
+      const reconnect = await s.connect(true),
+        hello = await reconnect.wait((message) => message.type === 'hello');
+      assert.equal(liveFrom(hello).activeAt(hello.serverTime).length, 0);
+    } finally {
+      await s.close();
+    }
+  },
+);
+
+test(
+  'piano live and replay recover a prior missing key-up through overlay closure without dropping recorded events',
+  windows,
+  async () => {
+    const s = await setup();
+    try {
+      await s.record();
+      const overlay = await s.connect(true);
+      await overlay.wait((message) => message.type === 'hello');
+      const studio = liveFrom(s.hello);
+      s.client.ws.on('message', (bytes) => {
+        const event = JSON.parse(bytes);
+        if (event.type === 'midi') studio.ingest(event);
+      });
+      const source = [
+        [187, 64, 127],
+        [155, 60, 65],
+        [155, 60, 95],
+        [155, 60, 0],
+        [187, 64, 0],
+      ];
+      s.bridge.message({ type: 'midi', data: source[0] });
+      s.bridge.message({ type: 'midi', data: source[1] });
+      await overlay.wait((message) => message.type === 'midi' && message.data[0] === 155);
+      await new Promise((resolve) => {
+        overlay.ws.once('close', resolve);
+        overlay.ws.close();
+      });
+      for (const data of source.slice(2)) s.bridge.message({ type: 'midi', data });
+      await s.client.wait(
+        (message) => message.type === 'midi' && message.data[0] === 187 && message.data[2] === 0,
+      );
+      assert.equal(studio.activeAt(s.app.state().serverTime).length, 0);
+      assert.equal(s.app.state().midiDiagnostics.heldKeys, 0);
+      assert.equal(s.app.state().midiDiagnostics.soundingVoices, 0);
+      assert.equal(s.app.state().midiDiagnostics.retriggerRecoveries, 1);
+      const diagnostics = await fetch(`http://127.0.0.1:${s.port}/api/midi-diagnostics`).then(
+        (response) => response.json(),
+      );
+      assert.equal(diagnostics.recoveries[0].note, 60);
+      assert.deepEqual(diagnostics.recoveries[0].context.at(-1).data, source[2]);
+      const saved = await s.stop();
+      assert.equal(saved.notePolicy, 'piano');
+      assert.deepEqual(
+        saved.events.map((event) => event.data),
+        source,
+      );
+      const replay = MidiPerformance.fromJSON(saved);
+      assert.deepEqual(
+        replay.notes.map((note) => [note.note, note.velocity]),
+        [
+          [60, 65],
+          [60, 95],
+        ],
+      );
+      assert.ok(replay.notes.every((note) => Number.isFinite(note.end)));
+    } finally {
+      await s.close();
+    }
+  },
+);

@@ -4,7 +4,7 @@ const $ = (id) => document.getElementById(id),
   params = new URLSearchParams(location.search),
   viewer = location.pathname === '/stage';
 if (viewer) document.body.classList.add('viewer');
-const live = new Performance(),
+const live = new Performance({ notePolicy: 'piano' }),
   cache = new Map();
 let socket,
   state = null,
@@ -150,7 +150,11 @@ function connectSocket() {
       return;
     }
     if (msg.type === 'hello' || msg.type === 'state') {
-      const oldId = state?.transport.sessionId;
+      const oldTransport = state?.transport;
+      const oldId = oldTransport?.sessionId;
+      const transportChanged = ['mode', 'sessionId', 'position', 'playing', 'startedAt'].some(
+        (key) => oldTransport?.[key] !== msg.transport[key],
+      );
       state = msg;
       offset = msg.serverTime - performance.now() / 1000;
       count = msg.midiCount;
@@ -159,7 +163,7 @@ function connectSocket() {
         for (const e of msg.history || []) live.ingest(e);
       }
       if (oldId !== msg.transport.sessionId || msg.type === 'hello') syncSession();
-      else syncAudio(true);
+      else syncAudio(transportChanged);
       updateUI();
     } else if (msg.type === 'midi') {
       live.ingest(msg);
@@ -177,6 +181,10 @@ function connectSocket() {
           $('footerStatus').textContent =
             `${names[msg.data[1] % 12]}${Math.floor(msg.data[1] / 12) - 1} · Velocity ${msg.data[2]} · Ch ${(msg.data[0] & 15) + 1}`;
       }
+    } else if (msg.type === 'deleted') {
+      cache.delete(msg.sessionId);
+      if (audioSession === msg.sessionId) stopAudio();
+      loadLibrary();
     } else if (msg.type === 'panic') {
       live.finish(msg.t);
     } else if (msg.type === 'pong') {
@@ -349,7 +357,7 @@ async function loadLibrary() {
       ? items
           .map(
             (s) =>
-              `<article class="session-card"><div class="session-icon">♩</div><div class="session-info"><strong>${escape(s.name)}</strong><small>${new Date(s.createdAt).toLocaleDateString('ko-KR')} · ${timeText(s.duration)} · ${s.hasAudio ? 'MIDI + WAV' : 'MIDI'} · ${s.eventCount} events</small></div><div class="session-actions"><a href="/api/midi/${s.id}" download="performance.mid">MIDI</a>${s.hasAudio ? `<a href="/media/${s.id}.wav" download>WAV</a>` : ''}<a href="/media/${s.id}.session.json" download>세션</a><button class="button outline" data-play="${s.id}">▷ 재생</button><button class="button export-button" data-export="${s.id}">영상 내보내기</button></div></article>`,
+              `<article class="session-card"><div class="session-icon">♩</div><div class="session-info"><strong>${escape(s.name)}</strong><small>${new Date(s.createdAt).toLocaleDateString('ko-KR')} · ${timeText(s.duration)} · ${s.hasAudio ? 'MIDI + WAV' : 'MIDI'} · ${s.eventCount} events</small></div><div class="session-actions"><a href="/api/midi/${s.id}" download="performance.mid">MIDI</a>${s.hasAudio ? `<a href="/media/${s.id}.wav" download>WAV</a>` : ''}<a href="/media/${s.id}.session.json" download>세션</a><button class="button outline" data-play="${s.id}">▷ 재생</button><button class="button export-button" data-export="${s.id}">영상 내보내기</button><button class="button delete-button" data-delete="${s.id}" data-name="${escape(s.name)}">삭제</button></div></article>`,
           )
           .join('')
       : '<div class="library-empty">아직 담아 둔 연주가 없어요. 첫 연주를 녹음해 보세요.</div>';
@@ -358,6 +366,15 @@ async function loadLibrary() {
   }
 }
 const setSettings = (patch) => send({ type: 'settings', settings: patch });
+let pendingDelete = null;
+function showDeleteDialog(id, name) {
+  if (exporting) return toast('영상 내보내기가 끝난 뒤 연주를 삭제할 수 있습니다.');
+  pendingDelete = id;
+  $('deleteTakeName').textContent = name;
+  $('confirmDelete').disabled = false;
+  $('confirmDelete').textContent = '연주 삭제';
+  $('deleteDialog').showModal();
+}
 async function exportVideo(id) {
   if (exporting) return;
   if (state?.recording || state?.starting || state?.stopping) {
@@ -672,9 +689,33 @@ if (!viewer) {
   };
   $('sessionList').onclick = (e) => {
     const play = e.target.closest('[data-play]'),
-      exp = e.target.closest('[data-export]');
+      exp = e.target.closest('[data-export]'),
+      del = e.target.closest('[data-delete]');
     if (play) send({ type: 'play', sessionId: play.dataset.play, position: 0 });
     if (exp) exportVideo(exp.dataset.export);
+    if (del) showDeleteDialog(del.dataset.delete, del.dataset.name);
+  };
+  $('confirmDelete').onclick = async () => {
+    if (!pendingDelete) return;
+    const id = pendingDelete;
+    $('confirmDelete').disabled = true;
+    $('confirmDelete').textContent = '삭제 중…';
+    try {
+      const response = await fetch('/api/session/' + encodeURIComponent(id), { method: 'DELETE' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || '연주를 삭제하지 못했습니다.');
+      cache.delete(id);
+      if (audioSession === id) stopAudio();
+      pendingDelete = null;
+      $('deleteDialog').close();
+      await loadLibrary();
+      toast('연주와 원음을 휴지통으로 옮겼습니다. 내보낸 영상은 유지됩니다.');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      $('confirmDelete').disabled = false;
+      $('confirmDelete').textContent = '연주 삭제';
+    }
   };
   $('importButton').onclick = () => $('importFile').click();
   $('importFile').onchange = async () => {

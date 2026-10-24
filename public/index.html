@@ -359,6 +359,17 @@
       </p>
       <button class="button outline" id="openStage">소스 화면 미리보기 ↗</button>
     </dialog>
+    <dialog id="deleteDialog" aria-labelledby="deleteTitle">
+      <button class="dialog-close" data-close="deleteDialog" aria-label="닫기">×</button>
+      <span class="eyebrow">YOUR COLLECTION</span>
+      <h2 id="deleteTitle">이 연주를 삭제할까요?</h2>
+      <p><strong id="deleteTakeName"></strong></p>
+      <p>연주 데이터와 원음을 휴지통으로 옮깁니다. 이미 내보낸 MP4·WebM 영상은 유지됩니다.</p>
+      <div class="dialog-actions">
+        <button class="button outline" data-close="deleteDialog">취소</button>
+        <button class="button danger" id="confirmDelete">연주 삭제</button>
+      </div>
+    </dialog>
     <dialog id="exportDialog">
       <span class="eyebrow">RENDER YOUR PERFORMANCE</span>
       <h2 id="exportTitle">영상으로 담는 중</h2>

@@ -9,7 +9,8 @@ const key = (channel, note) => `${channel}:${note}`;
 const finite = (value, fallback = 0) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
 
 export class Performance {
-  constructor() {
+  constructor({ notePolicy = 'fifo' } = {}) {
+    this.notePolicy = notePolicy === 'piano' ? 'piano' : 'fifo';
     this.reset();
   }
 
@@ -20,6 +21,7 @@ export class Performance {
     this.held = new Map();
     this.lastTime = 0;
     this.nextId = 1;
+    this.retriggerRecoveries = 0;
     return this;
   }
 
@@ -55,7 +57,18 @@ export class Performance {
         end: Infinity,
       };
       const id = key(channel, pitch);
-      const pressed = this.held.get(id) || [];
+      let pressed = this.held.get(id) || [];
+      if (this.notePolicy === 'piano' && pressed.length) {
+        // One physical piano key cannot be pressed again without being released.
+        // Recover a missing/duplicated upstream key transition at this new attack,
+        // retaining both attacks and any pedal tail without inventing a timeout.
+        for (const previous of pressed) {
+          previous.release = t;
+          if (!this.pedals[channel]) previous.end = t;
+        }
+        this.retriggerRecoveries += pressed.length;
+        pressed = [];
+      }
       pressed.push(note);
       this.held.set(id, pressed);
       this.notes.push(note);
@@ -148,6 +161,7 @@ export class Performance {
   toJSON() {
     return {
       version: 1,
+      notePolicy: this.notePolicy,
       duration: this.duration,
       events: this.events.map((e) => ({ t: e.t, data: [...e.data] })),
     };
@@ -157,7 +171,7 @@ export class Performance {
     if (!value || !Array.isArray(value.events))
       throw new Error('Invalid performance: events array is required.');
     if (value.events.length > 2000000) throw new Error('Performance exceeds the event limit.');
-    const performance = new Performance();
+    const performance = new Performance({ notePolicy: value.notePolicy });
     const events = value.events
       .filter((e) => e && Number.isFinite(e.t) && e.t >= 0)
       .sort((a, b) => a.t - b.t);

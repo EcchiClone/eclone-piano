@@ -2,7 +2,9 @@ import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
-const base = process.env.LUMA_TEST_URL || 'http://127.0.0.1:3210';
+if (process.env.LUMA_UI_ISOLATED !== '1' || !process.env.LUMA_TEST_URL)
+  throw new Error('Run npm run test:ui so fixture imports/deletion use an isolated data directory.');
+const base = process.env.LUMA_TEST_URL;
 const executablePath =
   process.env.LUMA_TEST_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 await fs.mkdir('.runtime', { recursive: true });
@@ -59,8 +61,22 @@ async function seekTo(t) {
 }
 
 try {
+  const escapedTitle = '<img src=x onerror="window.__deleteTitleExecuted=true"> & "연주" <b>보존할 문자</b>';
+  async function importFixture(name) {
+    const response = await fetch(base + '/api/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, duration: 60, events: [{ t: 0.2, data: [144, 60, 94] }, { t: 1.4, data: [128, 60, 0] }] }),
+    });
+    assert.equal(response.status, 200);
+    return response.json();
+  }
+  const deletingFixture = await importFixture(escapedTitle);
+  const retainedFixture = await importFixture('보존할 두 번째 연주 · 긴 제목의 반응형 목록 검증 '.repeat(5));
   await page.goto(base);
   await page.waitForFunction(() => window.lumaDiagnostics()?.mode);
+  await page.locator(`[data-delete="${deletingFixture.id}"]`).waitFor();
+  assert.equal(await page.locator('#sessionList .session-card').count(), 2);
+  assert.equal(await page.locator('#sessionList img').count(), 0, 'Imported title must remain plain text.');
   originalSettings = (await diagnostics()).settings;
   await page.locator('#returnLive').click();
   await page.waitForFunction(() => window.lumaDiagnostics().mode === 'live');
@@ -219,6 +235,35 @@ try {
   await page.waitForTimeout(120);
   report.layouts.push({ name: 'mobile-390', ...(await overflow()) });
   await capture('studio-demo-mobile', { fullPage: true });
+
+  // Exercise both confirmation outcomes against imported fixtures, never user takes.
+  await page.locator(`[data-delete="${deletingFixture.id}"]`).click();
+  await page.locator('#deleteDialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#deleteTakeName').textContent(), escapedTitle);
+  assert.equal(await page.locator('#deleteTakeName img, #deleteTakeName b').count(), 0);
+  assert.notEqual(await page.evaluate(() => window.__deleteTitleExecuted), true);
+  report.layouts.push({ name: 'delete-dialog-mobile-390', ...(await overflow()) });
+  await capture('session-delete-dialog-mobile');
+  await page.locator('#deleteDialog [data-close="deleteDialog"]').filter({ hasText: '취소' }).click();
+  await page.waitForFunction(() => !document.getElementById('deleteDialog').open);
+  assert.equal((await fetch(base + '/api/session/' + deletingFixture.id)).status, 200, 'Cancelling must preserve the take.');
+  assert.equal(await page.locator('#sessionList .session-card').count(), 2);
+
+  await page.locator(`[data-play="${deletingFixture.id}"]`).click();
+  await page.waitForFunction(id => window.lumaDiagnostics().mode === 'replay' && window.lumaDiagnostics().session === id, deletingFixture.id);
+  await page.locator(`[data-delete="${deletingFixture.id}"]`).click();
+  const deletionResponse = page.waitForResponse(response => response.request().method() === 'DELETE' && response.url().endsWith('/api/session/' + deletingFixture.id));
+  await page.locator('#confirmDelete').click();
+  const deletion = await deletionResponse;
+  assert.equal(deletion.status(), 200);
+  assert.deepEqual(await deletion.json(), { deleted: true, id: deletingFixture.id, trashed: true });
+  await page.waitForFunction(() => !document.getElementById('deleteDialog').open && window.lumaDiagnostics().mode === 'live');
+  await page.locator(`[data-delete="${deletingFixture.id}"]`).waitFor({ state: 'detached' });
+  assert.equal(await page.locator(`[data-delete="${retainedFixture.id}"]`).count(), 1);
+  assert.equal(await page.locator('#sessionList .session-card').count(), 1);
+  assert.equal((await fetch(base + '/api/session/' + deletingFixture.id)).status, 404);
+  assert.equal((await fetch(base + '/api/session/' + retainedFixture.id)).status, 200);
+  report.deletion = { cancelledTakePreserved: true, confirmationTrashedTake: true, replayReturnedToLive: true, otherTakePreserved: true, escapedTitleRemainedText: true };
   report.errors = errors;
   assert.deepEqual(errors, []);
   for (const layout of report.layouts)
