@@ -9,7 +9,7 @@ Requires the .NET 9 SDK to build and .NET 9 runtime to run. Build from the repos
 ```powershell
 dotnet build native-audio/ProcessAudio.csproj -c Release
 dotnet native-audio/bin/Release/net9.0-windows/ProcessAudio.dll --probe
-dotnet native-audio/bin/Release/net9.0-windows/ProcessAudio.dll --pid 19592 --output C:\recordings\take-001.wav
+dotnet native-audio/bin/Release/net9.0-windows/ProcessAudio.dll --pid 1234 --output C:\recordings\take-001.wav
 ```
 
 The PID above is an example. `--probe` / `--list` returns current Kontakt process IDs. Send `stop` followed by a newline to stdin to finish. EOF and Ctrl+C also stop and finalize the file. Keep a spawned process's stdin pipe open for the entire recording. Optional `--seconds 5` stops after five seconds; it does not override stdin closure. Existing output files are never overwritten.

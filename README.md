@@ -1,102 +1,186 @@
-# Luma Piano
+# EClone Piano
 
-Kontakt 연주를 빛으로 보여 주는 Windows 로컬 스튜디오입니다. 외부 계정이나 클라우드 업로드 없이 이 컴퓨터에서 동작합니다.
+**연주를 빛으로. · By EClone Games**
 
-## 실행
+A local MIDI visualization and performance recording studio for Windows. Create transparent OBS scenes, replay and restyle performances, and enjoy a click-through desktop overlay.
 
-현재 개발 환경에는 의존성과 오디오 도우미가 설치되어 있습니다. **`Luma Piano.vbs`를 더블클릭**하면 콘솔 창 없이 데스크톱 앱이 열립니다. 또는 프로젝트 폴더에서 `npm start`를 실행하세요.
+[![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4)](#준비물)
+[![License: MIT](https://img.shields.io/badge/License-MIT-teal.svg)](LICENSE)
+[![Checks](https://github.com/EcchiClone/eclone-piano/actions/workflows/checks.yml/badge.svg)](https://github.com/EcchiClone/eclone-piano/actions/workflows/checks.yml)
 
-처음 설치하는 컴퓨터에서는 Windows, Node.js 22 이상, .NET 9 SDK가 필요합니다. 고정 60fps MP4 내보내기에는 PATH에 등록된 FFmpeg·FFprobe와 WebCodecs를 지원하는 최신 Chrome 또는 Luma 데스크톱 앱이 필요합니다.
+![EClone Piano 스튜디오: 연주 미리보기, 녹음, 장면 디자인](docs/images/studio-aurora.png)
 
-```powershell
-npm ci
-npm run build:audio
-npm start
+MIDI 건반 연주를 빛과 입자로 표현하는 **Windows 로컬 앱**입니다. 방송에서는 투명한 피아노 화면으로, 녹음 후에는 다시 꾸밀 수 있는 연주 영상으로, 평소에는 작업 화면 위의 오버레이로 사용합니다. 계정이나 클라우드 업로드 없이 연주 파일을 PC에 보관합니다.
+
+## 무엇을 할 수 있나요?
+
+| 사용 목적            | 제공 기능                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| **실시간 방송**      | 건반에서 위로 뻗는 노트, 벨로시티·서스테인 표시, OBS 투명 브라우저 소스                     |
+| **녹음과 영상 편집** | MIDI 이벤트와 Kontakt 원음 동시 저장, 재생·탐색·디자인 변경, 하강형 노트, 1080p / 60fps MP4 |
+| **데스크톱 감상**    | 모니터 선택, 항상 위·클릭 통과 오버레이, 노트와 건반의 개별 불투명도, 건반 숨기기           |
+
+Aurora / Golden / Violet 테마, 글로우·파티클, 음 이름, 88 / 61 / 49 / 37건반 범위를 제공합니다. 저장한 연주는 WAV·MIDI·세션 JSON으로 내보낼 수 있으며, 삭제한 원본은 앱 휴지통에 보관합니다.
+
+![Golden 테마의 하강형 노트: 저장된 연주를 영상으로 다시 꾸미는 예시](docs/images/stage-golden.png)
+
+_스크린샷은 앱에서 만든 데모 장면입니다. 데모는 무음이며, 실제 녹음이나 타사의 피아노 음원을 포함하지 않습니다. [시각 자료와 생성 방법](docs/images/README.md)_
+
+> **지원 범위:** 일반 MIDI 입력으로 시각화할 수 있습니다. 원음 녹음은 현재 **Kontakt 독립 실행 앱**을 대상으로 하며 Kontakt 7에서 확인했습니다. DAW 안의 Kontakt 플러그인, 임의의 다른 앱 오디오, ASIO 직접 캡처는 지원하지 않습니다. 음원·가상악기를 내장한 프로그램은 아닙니다.
+
+## 준비물
+
+처음 설치할 때 인터넷이 필요합니다. 설치 후 연주·녹음·재생은 로컬에서 동작합니다.
+
+| 구성요소                                                                               | 역할                                           | 언제 필요한가요?                                                   |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------ |
+| **Windows 10 / 11, x64**                                                               | MIDI 입력과 투명 데스크톱 창                   | 앱 사용. 오디오 캡처는 업데이트된 Windows가 필요합니다.            |
+| [**Node.js 22 이상**](https://nodejs.org/en/download) + npm                            | 앱 의존성 설치·실행                            | 필수. Windows x64 LTS 설치 프로그램을 사용하면 npm도 설치됩니다.   |
+| **Electron**                                                                           | 별도 브라우저 없이 스튜디오·오버레이 실행      | `npm ci`가 자동 설치합니다.                                        |
+| **MIDI 건반과 드라이버**                                                               | 타건·페달 정보를 PC로 전달                     | 실제 연주. 먼저 Windows에서 장치를 인식해야 합니다.                |
+| **Kontakt와 사용할 악기**                                                              | 실제 피아노 소리를 재생                        | Kontakt 원음 녹음. 별도 설치·라이선스가 필요합니다.                |
+| [**loopMIDI**](https://www.tobias-erichsen.de/software/loopmidi.html)                  | Kontakt에서 앱으로 MIDI를 전달하는 가상 케이블 | 아래 Kontakt 연결 방식. **소리는 전달하지 않습니다.**              |
+| [**.NET 9 SDK · Windows x64**](https://dotnet.microsoft.com/en-us/download/dotnet/9.0) | 프로세스 오디오 도우미 빌드·실행               | Kontakt 원음 녹음. SDK에 필요한 런타임이 포함됩니다.               |
+| [**FFmpeg + FFprobe**](https://ffmpeg.org/download.html)                               | 영상·원음을 MP4로 합치고 프레임 수 검사        | 영상 내보내기. 두 실행 파일이 있는 `bin` 폴더를 PATH에 등록합니다. |
+| [**OBS Studio**](https://obsproject.com/download)                                      | 방송·방송 화면 녹화                            | OBS에 시각화를 넣을 때만 필요합니다.                               |
+
+**MIDI 화면만 먼저 보고 싶다면:** Windows와 Node.js로 앱을 실행한 뒤 **데모 미리보기**를 누르세요. .NET·Kontakt·loopMIDI·FFmpeg·OBS는 데모에 필요하지 않습니다. 실제 MIDI 시각화도 .NET 없이 사용할 수 있습니다.
+
+## 빠른 시작
+
+1. [저장소](https://github.com/EcchiClone/eclone-piano)의 **Code → Download ZIP**을 내려받아 쓰기 가능한 폴더에 압축을 풉니다. 또는 Git을 사용합니다.
+
+   ```powershell
+   git clone https://github.com/EcchiClone/eclone-piano.git
+   cd eclone-piano
+   ```
+
+2. 압축을 푼 **`package.json`이 있는 폴더**에서 PowerShell을 열고 실행합니다.
+
+   ```powershell
+   npm ci
+   npm run doctor
+   npm start
+   ```
+
+   `doctor`는 가능한 기능과 부족한 구성요소를 알려 줍니다. 프로그램 설치나 Windows 설정 변경은 하지 않습니다. PowerShell이 `npm.ps1` 실행을 막는다면 같은 명령의 `npm` 대신 **`npm.cmd`**를 사용하세요.
+
+3. 스튜디오에서 **데모 미리보기**로 화면을 확인합니다. Kontakt 원음도 녹음하려면 .NET 9 SDK를 설치하고, 앱을 종료한 뒤 한 번 실행합니다.
+
+   ```powershell
+   npm run setup
+   npm start
+   ```
+
+   `setup`은 오디오 도우미를 빌드하고 환경을 진단합니다. 이후에는 **`EClone Piano.vbs` 더블클릭**으로 콘솔 없이 실행할 수 있습니다. Windows Script Host를 사용할 수 없는 환경에서는 `npm start`를 사용하세요.
+
+브라우저 전용 모드는 `npm run serve` → <http://127.0.0.1:3210>입니다. 데스크톱 앱과 브라우저 전용 서버 중 **하나만 실행**하세요. 실행 중인 데스크톱 앱의 같은 주소를 브라우저에서 여는 것은 가능합니다. 전체 모니터 오버레이는 데스크톱 앱에서 지원합니다.
+
+## 건반 → Kontakt → EClone Piano 연결
+
+MIDI는 **어떤 음을 언제 눌렀는지**를 전달합니다. 소리는 Kontakt에서 별도로 녹음합니다.
+
+```mermaid
+flowchart LR
+    K[외장 MIDI 건반] -->|타건·페달| C[Kontakt standalone]
+    C -->|MIDI 출력| M[loopMIDI 가상 포트]
+    M -->|MIDI 입력| V[EClone Piano 시각화]
+    C -->|Windows 공유 오디오| A[EClone Piano 원음 녹음]
+    V --> O[OBS / 데스크톱 오버레이]
+    V --> R[저장한 연주 / MP4]
+    A --> R
 ```
 
-브라우저 전용 실행: `npm run serve` → <http://127.0.0.1:3210>. 브라우저 전용 서버와 데스크톱 앱은 같은 포트를 사용하므로 하나만 실행하세요. 컴퓨터 전체에 겹쳐지는 오버레이는 데스크톱 앱에서 지원합니다.
+1. **loopMIDI**를 실행합니다. `New port-name`에 **EClone Piano**를 쓰고 **+**를 누릅니다. 사용 중에는 loopMIDI를 실행해 두세요.
+2. Kontakt **Options → MIDI → Inputs**에서 실제 건반 입력을 켭니다. 가상 포트 **EClone Piano 입력은 Off**로 둡니다.
+3. **MIDI → Outputs**에서 **EClone Piano: On**으로 설정합니다.
+4. **Engine → Send MIDI to outside world**에서 **Incoming notes**, **Incoming CCs**를 켭니다. Kontakt 화면 건반도 표시하려면 **GUI keyboard**도 켭니다. `Script generated notes / CCs`는 악기 스크립트 출력을 보고 싶을 때만 켭니다.
+5. EClone Piano의 **MIDI INPUT → 새로고침 → EClone Piano → 연결**을 누릅니다.
+6. 건반을 눌렀다 떼고, 서스테인 페달도 밟았다 떼어 봅니다. 이벤트 수가 증가하고 노트가 끝나면 MIDI 연결이 된 것입니다. **짧은 테스트 녹음을 시작했을 때 입력 미터까지 반응하면 원음 연결도 확인됩니다.**
 
-## Keystation → Kontakt → Luma 연결
-
-1. [loopMIDI 공식 사이트](https://www.tobias-erichsen.de/software/loopmidi.html)에서 설치·실행하고 `Luma Piano` 포트를 만듭니다. loopMIDI는 실행 상태로 유지합니다.
-2. Kontakt **Options → MIDI → Outputs → Luma Piano: On**.
-3. **Engine → Send MIDI to outside world**에서 **Incoming notes**, **Incoming CCs**, **GUI keyboard**를 체크합니다. 악기 스크립트가 생성하는 노트까지 필요할 때만 Script generated notes/CCs도 선택합니다.
-4. Kontakt의 Keystation 입력은 유지합니다. **Luma Piano MIDI 입력은 Off**로 두어 순환 연결을 피합니다.
-5. Luma 스튜디오에서 MIDI 장치 새로고침 → **Luma Piano → 연결**. 건반과 페달을 연주하면 이벤트 수, 키 표시와 노트가 반응해야 합니다.
-
-새 포트가 Kontakt에 보이지 않으면 악기 상태를 저장하고 Kontakt를 다시 실행하세요. 하드웨어 MIDI 장치를 Kontakt와 동시에 직접 열 수 있는지는 드라이버마다 다릅니다. 이 환경의 Keystation 직접 동시 열기는 WinMM 오류 7을 반환했으므로 가상 포트 구성을 사용합니다.
-
-Kontakt 설정은 사용자가 직접 조작합니다. 앱은 Kontakt 설정이나 음색을 변경하지 않습니다.
+가상 포트 이름은 자유롭습니다. 이전 버전에서 만든 `Luma Piano` 포트도 그대로 사용할 수 있으며, 기존 녹음·디자인·장치 설정도 유지됩니다. 새 포트가 Kontakt에 보이지 않으면 악기 상태를 저장한 뒤 Kontakt를 재실행하세요. 자세한 순서와 일반 MIDI 건반 직접 연결은 [설치·연결 가이드](docs/SETUP.md)를 참고하세요. [Kontakt 공식 옵션 설명](https://docs.native-instruments.com/online-guides/kontakt-manual/en/options-dialog)
 
 ## 세 가지 사용 방식
 
-### 실시간 시각화 / OBS
+### 1. OBS 방송 화면
 
-실시간은 노트가 건반에서 **위로** 뻗어 나갑니다. 음을 누른 시간, 벨로시티와 채널별 서스테인 페달을 반영합니다.
+OBS **소스 → + → 브라우저**에서 `로컬 파일`을 끄고 설정합니다. [OBS 브라우저 소스 설명](https://obsproject.com/kb/browser-source)
 
-OBS에서 브라우저 소스를 추가하세요.
+| 항목                 | 값                                                   |
+| -------------------- | ---------------------------------------------------- |
+| URL                  | `http://127.0.0.1:3210/stage?transparent=1`          |
+| 너비 / 높이          | `1920` / `1080`                                      |
+| 사용자 지정 프레임률 | 켜기, `60`                                           |
+| 실시간 Kontakt 소리  | OBS의 **응용 프로그램 오디오 캡처**에서 Kontakt 선택 |
 
-| 항목          | 값                                              |
-| ------------- | ----------------------------------------------- |
-| URL           | `http://127.0.0.1:3210/stage?transparent=1`     |
-| 너비 / 높이   | 1920 / 1080                                     |
-| 프레임률      | 60                                              |
-| 라이브 오디오 | OBS의 **응용 프로그램 오디오 캡처 → Kontakt 7** |
+스튜디오를 실행해 둔 상태에서 사용합니다. 브라우저 소스에는 조작 UI 없이 건반과 노트만 나오며 디자인과 재생 위치가 동기화됩니다. 라이브 연주는 **아래에서 위로** 올라갑니다.
 
-브라우저 소스는 UI 없이 투명 캔버스만 보여 주며 디자인과 재생 위치가 스튜디오와 동기화됩니다. 저장된 연주를 원음과 함께 OBS에 재생하려면 URL 끝에 `&audio=1`을 붙이세요. 동일 원음이 중복 출력되지 않도록 OBS 오디오 경로는 하나만 사용합니다.
+저장한 연주의 원음도 OBS로 보내려면 스튜디오의 **OBS 브라우저 소스 → 저장된 연주 재생 시 원음도 출력**을 켜고 새 URL을 복사하세요(`&audio=1`). OBS에서 같은 소리를 브라우저와 데스크톱 오디오로 중복 수집하지 않도록 출력 경로를 하나로 정하세요.
 
-### 녹음 / 다시 꾸미기 / 영상 내보내기
+### 2. 녹음 → 다시 꾸미기 → MP4
 
-1. 연주 이름을 입력하고 현재 Kontakt 프로세스를 선택합니다.
-2. **Kontakt 소리만 함께 녹음**을 체크하고 **Kontakt 샘플레이트**를 Kontakt의 Options → Audio 값과 맞춥니다. 현재 AudioBox 22 VSL 설정은 44,100 Hz이므로 기본값 44.1 kHz를 사용합니다. 이어서 **녹음 시작**을 누릅니다.
-3. 녹음 직전에 실행 중인 Kontakt를 다시 확인합니다. Kontakt를 재실행했어도 하나만 실행 중이면 새 프로세스로 자동 갱신합니다. 여러 개면 녹음할 소스를 선택하세요. 오디오 준비가 끝나 버튼에 녹음 시간이 표시되면 연주합니다. 입력 미터로 실제 소리 수신을 확인하세요.
-4. **녹음 종료**를 누르면 `recordings/`에 원음 WAV와 MIDI 이벤트 세션을 따로 저장합니다.
-5. 내 연주에서 재생하고 색상·방향·속도·건반 표시를 바꿉니다. **위에서 아래로** 떨어지는 시각화는 저장된 연주와 데모에서 사용할 수 있습니다.
-6. **영상 내보내기**는 현재 디자인으로 초당 60개의 프레임을 모두 만들어 1920×1080 MP4로 저장합니다. 컴퓨터 성능에 따라 연주 길이보다 오래 걸릴 수 있습니다. 렌더링 동안 앱을 열어 두세요. 원음이 있으면 영상에 포함됩니다. 누락된 프레임을 복제해 채우지 않으며, 저장 전에 실제 프레임 수를 검증합니다.
+1. 연주 이름과 **오디오 소스**를 선택합니다. **Kontakt 소리만 함께 녹음**을 켭니다.
+2. **Kontakt 샘플레이트**를 Kontakt의 **Options → Audio → Sample rate**와 똑같이 맞춥니다. `44,100` / `48,000 Hz`를 지원합니다.
+3. **녹음 시작** 후 녹음 시간이 표시되고 입력 미터가 반응하는지 확인한 다음 연주합니다. MIDI만 저장하려면 오디오 체크를 끕니다.
+4. **녹음 종료** 후 **내 연주**에서 재생합니다. 테마·노트 흐름·건반 범위를 바꾸거나 **아래로 내려오기**를 선택합니다. 화면에 머무는 시간은 노트 이동 표현을 바꾸며 원음의 재생속도는 유지합니다.
+5. 연주 카드의 **영상 내보내기** 버튼으로 내보냅니다. 모든 프레임을 순서대로 렌더링하는 **1920×1080 / 60fps MP4**이며, 원음이 있으면 함께 포함합니다. PC 성능에 따라 연주보다 오래 걸릴 수 있습니다.
 
-원음은 Windows의 프로세스별 WASAPI loopback으로 선택한 Kontakt 프로세스 및 하위 프로세스만 캡처합니다. 마이크와 전체 시스템 믹스로 자동 전환하지 않습니다. ASIO·독점 출력은 Windows 공유 오디오 경로를 우회할 수 있습니다. 소리는 들리는데 미터가 조용하면 Kontakt 출력 방식이나 별도 오디오 라우팅을 확인하세요. 현재 개발 컴퓨터의 Kontakt에서는 실제 신호 캡처를 확인했습니다.
+재생은 저장한 WAV를 사용합니다. MIDI만 있는 연주와 데모는 무음입니다. Kontakt 악기를 바꿔 원음을 다시 합성하는 기능은 없습니다. 스튜디오를 여러 개 열었을 때는 **재생을 시작한 스튜디오 한 곳에서만 소리**가 나며, 그 창이 연결을 잃으면 재생을 멈춥니다. 명시적으로 켠 OBS `audio=1`은 별도 출력입니다.
 
-WAV는 선택한 44.1 또는 48 kHz stereo / 16-bit PCM입니다. 기존 48 kHz 녹음도 그대로 재생합니다. MIDI는 표준 `.mid`로도 내려받을 수 있습니다. `.session.json`에는 이벤트와 디자인이 저장됩니다. 세션 JSON 가져오기는 MIDI 이벤트를 가져오며 WAV는 포함하지 않습니다. 다른 컴퓨터로 전체 원본을 옮길 때는 해당 UUID의 `.session.json`과 `.wav`를 함께 `recordings/`에 복사하세요. 원음 자체는 변경하지 않으므로 Kontakt 음색을 재합성하는 기능과는 다릅니다.
+### 3. 데스크톱 오버레이
 
-저장한 연주 카드의 **삭제**를 누르면 확인 후 연주 데이터·원음·저장된 MIDI를 `recordings/.trash/`로 옮깁니다. 이미 내보낸 MP4·WebM은 유지됩니다. 녹음·저장·영상 생성 중인 연주는 삭제할 수 없습니다. 실수로 삭제했다면 해당 휴지통 하위 폴더의 UUID 파일들을 `recordings/`로 다시 옮겨 복원할 수 있습니다.
+데스크톱 앱에서 모니터를 고르고 **데스크톱 오버레이**를 누릅니다. 다른 프로그램 위에 표시되며 건반 영역까지 마우스 클릭이 통과합니다.
 
-### 데스크톱 오버레이
+- **노트 불투명도 / 건반 불투명도**를 각각 조절합니다. 초기값은 `60% / 18%`입니다.
+- **오버레이 건반 표시**를 끄면 화면 맨 아래에서 노트만 올라옵니다.
+- **Ctrl + Shift + F10**: 오버레이 켜기·끄기.
+- **Ctrl + Shift + F12**: 오버레이 닫고 스튜디오로 돌아오기.
 
-모니터를 선택하고 **데스크톱 오버레이**를 누르면 전체 화면의 투명·항상 위·클릭 통과 창이 열립니다.
+오버레이 전용 불투명도는 OBS와 MP4에 영향을 주지 않습니다. 다른 앱이 단축키를 먼저 사용한 경우 스튜디오 버튼으로 닫을 수 있습니다.
 
-오버레이 기본 불투명도는 **노트 60%, 건반 18%**입니다. 아래의 작업 화면을 가리지 않도록 노트·건반을 각각 조절할 수 있습니다. **오버레이 건반 표시**를 끄면 건반 없이 화면 맨 아래에서 노트가 시작됩니다. 이 설정은 OBS 소스와 영상 내보내기에는 적용되지 않습니다.
+## 연주 파일과 백업
 
-- **Ctrl + Shift + F10**: 오버레이 켜기 / 끄기
-- **Ctrl + Shift + F12**: 오버레이 닫고 스튜디오로 돌아오기
+프로젝트의 **`recordings/`**에 저장합니다. 앱의 **저장 폴더** 버튼으로 열 수 있습니다.
 
-다른 앱이 같은 단축키를 사용하면 스튜디오 버튼으로 닫을 수 있습니다. 스튜디오를 종료하면 오버레이와 로컬 서버도 종료됩니다.
+| 파일                               | 내용                                               |
+| ---------------------------------- | -------------------------------------------------- |
+| `<id>.session.json`                | MIDI 이벤트, 연주 이름, 디자인, 타이밍 정보        |
+| `<id>.wav`                         | 원음. Stereo / 16-bit PCM, 선택한 44.1 또는 48 kHz |
+| `.mid` 다운로드                    | 다른 MIDI 도구에서 사용할 표준 MIDI 파일           |
+| 내보낸 `.mp4`                      | H.264 영상과 원음이 있는 경우 AAC 오디오           |
+| `settings.json`, `connection.json` | 앱 디자인과 마지막 연결 장치 설정                  |
 
-## 노트가 계속 남거나 녹음이 끊길 때
+다른 PC로 옮길 때는 앱을 종료한 뒤 **`recordings/` 전체를 백업**하거나 같은 `<id>`의 JSON과 WAV를 함께 복사하세요. **세션 가져오기**는 JSON의 MIDI 데이터를 가져오며 WAV는 포함하지 않습니다. 일반 `.mid` 파일 가져오기는 아직 지원하지 않습니다.
 
-0.1.3에서는 Kontakt의 44.1 kHz·309샘플 출력과 48 kHz 캡처 사이에서 발생한 주기적 틱을 확인했습니다. 같은 연주를 비교 녹음했을 때 44.1 kHz에서는 사라졌으며, 48 kHz에서는 정수·실수 샘플 형식 모두에서 재현됐습니다. **Kontakt 샘플레이트**를 실제 출력과 맞춰 새로 녹음하세요. 기존 파일에 들어간 틱은 이 설정 변경으로 소급 복구되지 않습니다.
+연주 **삭제**는 원본 JSON·WAV·MIDI를 `recordings/.trash/`로 이동합니다. 이미 내보낸 영상은 보존합니다. 복원하려면 앱을 종료하고 해당 휴지통 폴더의 같은 ID 파일들을 `recordings/`로 되돌리세요. 기존 파일과 ID가 겹치면 덮어쓰지 말고 먼저 백업하세요.
 
-라이브 피아노는 같은 채널·건반의 재타건 시 이전 물리 누름 상태를 정리합니다. 실제로 오래 누르는 건반과 페달 잔향에는 시간 제한을 적용하지 않습니다. 입력 장치에서 해제 신호가 누락되어 노트가 남았다면 스튜디오의 **노트 초기화** 버튼으로 즉시 정리할 수 있습니다. `/api/midi-diagnostics`에는 최근 입력과 자동 복구 문맥이 남습니다.
+## 문제 해결
 
-오디오 캡처는 첫 패킷의 시각으로 녹음 시작을 맞춘 뒤, 장치의 연속 샘플 위치를 사용합니다. 장치가 위치를 제공하지 않으면 받은 샘플 수를 사용합니다. 0.1.2에서는 시스템 시계 오차를 맞추려고 반복적으로 짧은 무음을 넣던 문제를 수정했습니다. 긴 연주의 MIDI 시각은 실제 오디오 위치에 맞춰 저장하며 원래 시각도 각 이벤트의 `wallTime`에 보관합니다. 이 수정은 새 녹음부터 적용되며 기존 WAV를 바꾸지 않습니다. 리미터는 입력 음량 초과에 대한 도구이며, 이미 누락된 샘플이나 무음 구간을 복원하지 못합니다.
+| 증상                                  | 먼저 확인할 것                                                                                                   |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `npm`, `dotnet`, `ffmpeg`를 찾지 못함 | 설치·PATH 등록 후 터미널과 앱을 다시 엽니다. `npm run doctor`를 실행합니다.                                      |
+| MIDI 입력이 없거나 열리지 않음        | 건반 드라이버·loopMIDI 실행·포트 새로고침을 확인합니다. 다른 앱이 물리 포트를 독점하면 가상 포트로 연결합니다.   |
+| 음을 떼도 노트가 남음                 | **노트 초기화**를 누르고 Incoming CCs와 페달 해제 신호를 확인합니다.                                             |
+| 소리는 나지만 녹음 미터가 조용함      | Kontakt의 **WASAPI (Shared Mode)** 출력으로 확인합니다. ASIO·독점 모드는 캡처 경로를 우회할 수 있습니다.         |
+| Kontakt 재시작 후 녹음 소스가 없음    | 오디오 소스를 새로고침합니다. 단일 새 인스턴스는 녹음 직전에 자동 갱신하고, 여러 개면 직접 선택합니다.           |
+| 새 녹음에 주기적인 틱이 생김          | Kontakt와 녹음 샘플레이트가 같은지 확인합니다. 기존 파일에 들어간 잡음은 설정 변경으로 복원되지 않습니다.        |
+| 특정 플레이어에서만 왜곡됨            | 동일 WAV·MP4를 다른 플레이어와 비교하고 음량 증폭·이퀄라이저·음장 효과를 확인합니다.                             |
+| 영상 생성이 느리거나 실패함           | FFmpeg·FFprobe와 H.264 인코더 지원을 확인합니다. 데스크톱 앱에서 시도하고, 렌더링이 끝날 때까지 앱을 유지합니다. |
+| 실행 시 포트 사용 중 오류             | `3210`을 쓰는 다른 EClone Piano 앱/서버를 종료합니다.                                                            |
 
-## 디자인
+[자세한 설치·연결](docs/SETUP.md) · [개발 및 테스트](docs/DEVELOPMENT.md) · [검증 범위](docs/VALIDATION.md)
 
-Aurora / Golden / Violet 테마, 파티클, 글로우, 화면에 보이는 시간, 88 / 61 / 49 / 37건반 범위, 음 이름, 건반 숨김, 투명 배경을 제공합니다. Keystation 49에 맞는 범위를 선택할 수 있으며 음 이름은 MIDI 60 = C4 기준입니다. 데모는 디자인 확인용 무음 연주이며 실제 MIDI 연결과 구분해 표시합니다.
+## 개발과 라이선스
 
-## 검증과 개발
+Electron + Node.js + Canvas 2D, WinMM MIDI 브리지, C# WASAPI 프로세스 오디오 캡처로 구성합니다. 서버는 `127.0.0.1`에만 바인딩됩니다. 개인 녹음·의존성·임시 자료는 Git에서 제외합니다. 현재 배포 방식은 **소스에서 설치·실행**이며 별도 설치형 EXE는 제공하지 않습니다.
 
 ```powershell
 npm test
 npm run check
 npm run test:ui
 npm run test:export
-node native/test-bridge.mjs
-dotnet native-audio/bin/Release/net9.0-windows/ProcessAudio.dll --self-test
-node native-audio/smoke-test.mjs
 ```
 
-`npm run test:ui`와 `npm run test:export`는 별도 로컬 서버와 임시 데이터 폴더를 사용합니다. 실행 중인 스튜디오의 녹음과 디자인을 바꾸지 않고 Chrome headless로 화면과 영상·오디오 파일을 검증합니다. `.runtime/`에 스크린샷과 검사 결과를 보관합니다. `npm run test:desktop`은 스튜디오가 종료된 상태에서 앱 자체와 투명 오버레이를 실행해 검사합니다. Kontakt나 다른 사용자 앱은 조작하지 않습니다.
+버그 제보에는 Windows 버전, 연결 방식, 재현 순서, 오류 문구와 `npm run doctor` 결과를 남겨 주세요. 진단 출력의 개인 폴더 경로는 지워도 됩니다. 실제 연주 파일은 필요한 경우에만 직접 첨부하세요.
 
-구성: `public/` 스튜디오·렌더러, `server/` 로컬 서버·세션, `desktop/` Electron 오버레이, `native/` WinMM MIDI, `native-audio/` 프로세스 오디오 캡처. 자세한 네이티브 프로토콜과 제한은 각 폴더 README를 참고하세요.
-
-연주 파일과 영상, 의존성, 임시 테스트 자료는 Git에 포함하지 않습니다. 기능 단위 커밋으로 구현 이력을 관리합니다.
+**[MIT License](LICENSE) · Copyright © 2026 EClone Games.** Kontakt, loopMIDI, OBS, FFmpeg 및 각 의존성은 해당 제작자의 별도 라이선스를 따릅니다. 이 프로젝트는 Native Instruments와 제휴한 제품이 아닙니다.
