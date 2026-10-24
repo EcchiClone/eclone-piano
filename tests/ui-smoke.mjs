@@ -129,6 +129,83 @@ try {
   );
   await stage.screenshot({ path: '.runtime/stage-transparent-1920.png', omitBackground: true });
   report.screenshots.push('.runtime/stage-transparent-1920.png');
+  const desktopOverlay = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  await desktopOverlay.goto(base + '/stage?transparent=1&overlay=1');
+  await desktopOverlay.waitForFunction(() => window.lumaDiagnostics()?.session === 'demo');
+  await desktopOverlay.bringToFront();
+  await desktopOverlay.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  // In the 37-key view, strike glow can reach 150px into the keyboard. Sample
+  // its lower edge to measure keyboard opacity independently of the note layer.
+  const keyAlpha = () =>
+    desktopOverlay.evaluate(
+      () => document.querySelector('canvas').getContext('2d').getImageData(500, 1070, 1, 1).data[3],
+    );
+  const defaultOverlayAlpha = await keyAlpha();
+  const overlayPixels = await desktopOverlay.evaluate(() => {
+    const canvas = document.querySelector('canvas'),
+      ctx = canvas.getContext('2d');
+    return {
+      settings: window.lumaDiagnostics().settings,
+      dimensions: [canvas.width, canvas.height],
+      samples: [900, 950, 1000, 1030, 1060, 1070].map((y) => ({
+        x: 500,
+        y,
+        alpha: ctx.getImageData(500, y, 1, 1).data[3],
+      })),
+    };
+  });
+  console.log('Overlay alpha diagnostic:', JSON.stringify(overlayPixels));
+  await desktopOverlay.screenshot({
+    path: '.runtime/overlay-alpha-diagnostic.png',
+    omitBackground: true,
+  });
+  assert.ok(
+    defaultOverlayAlpha >= 44 && defaultOverlayAlpha <= 48,
+    `Overlay keys must start at18% rather than opaque white; actual alpha=${defaultOverlayAlpha}.`,
+  );
+  await page.locator('#overlayKeyboardOpacity').evaluate((element) => {
+    element.value = '0.08';
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await waitSettings('overlayKeyboardOpacity', 0.08);
+  await desktopOverlay.bringToFront();
+  await desktopOverlay
+    .waitForFunction(() => {
+      const alpha = document.querySelector('canvas').getContext('2d').getImageData(500, 1070, 1, 1)
+        .data[3];
+      return alpha >= 18 && alpha <= 22;
+    })
+    .catch(async (error) => {
+      throw new Error(
+        JSON.stringify(
+          await desktopOverlay.evaluate(() => ({
+            settings: window.lumaDiagnostics().settings,
+            alpha: document.querySelector('canvas').getContext('2d').getImageData(500, 1070, 1, 1)
+              .data[3],
+          })),
+        ),
+        { cause: error },
+      );
+    });
+  report.overlay = {
+    defaultKeyboardAlpha: defaultOverlayAlpha,
+    adjustedKeyboardAlpha: await keyAlpha(),
+  };
+  assert.equal(
+    await stage.evaluate(
+      () => document.querySelector('canvas').getContext('2d').getImageData(500, 1000, 1, 1).data[3],
+    ),
+    255,
+    'Overlay preferences must not fade the OBS source.',
+  );
+  await page.locator('#overlayKeyboardOpacity').evaluate((element) => {
+    element.value = '0.18';
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await waitSettings('overlayKeyboardOpacity', 0.18);
+  await desktopOverlay.close();
   await stage.close();
 
   await page.locator('#transparent').uncheck();

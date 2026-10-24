@@ -58,6 +58,13 @@ function visualState() {
     time: position(),
     direction: mode === 'live' ? 'up' : settings.direction,
     background: params.has('transparent') ? 'transparent' : settings.background || 'dark',
+    ...(params.get('overlay') === '1'
+      ? {
+          keyboard: settings.keyboard !== false && settings.overlayKeyboard !== false,
+          noteOpacity: settings.overlayNoteOpacity ?? 0.6,
+          keyboardOpacity: settings.overlayKeyboardOpacity ?? 0.18,
+        }
+      : {}),
     quality: 1,
   };
 }
@@ -259,6 +266,14 @@ function updateUI() {
   $('glow').value = s.glow;
   $('glowValue').textContent = Math.round(s.glow * 100) + '%';
   for (const key of ['particles', 'keyboard', 'labels']) $(key).checked = s[key];
+  $('overlayKeyboard').checked = s.overlayKeyboard !== false;
+  for (const [key, fallback] of [
+    ['overlayNoteOpacity', 0.6],
+    ['overlayKeyboardOpacity', 0.18],
+  ]) {
+    $(key).value = s[key] ?? fallback;
+    $(key + 'Value').textContent = Math.round((s[key] ?? fallback) * 100) + '%';
+  }
   $('transparent').checked = s.background === 'transparent';
   $('noteRange').value = String(s.maxNote - s.minNote + 1);
   $('stageKeys').textContent = s.maxNote - s.minNote + 1 + ' KEYS';
@@ -621,9 +636,9 @@ if (!viewer) {
         setSettings({ direction: b.dataset.direction });
       }),
   );
-  for (const key of ['particles', 'keyboard', 'labels'])
+  for (const key of ['particles', 'keyboard', 'labels', 'overlayKeyboard'])
     $(key).onchange = () => setSettings({ [key]: $(key).checked });
-  for (const key of ['secondsVisible', 'glow'])
+  for (const key of ['secondsVisible', 'glow', 'overlayNoteOpacity', 'overlayKeyboardOpacity'])
     $(key).oninput = () => setSettings({ [key]: Number($(key).value) });
   $('transparent').onchange = () =>
     setSettings({ background: $('transparent').checked ? 'transparent' : 'dark' });

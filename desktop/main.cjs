@@ -14,7 +14,7 @@ function toggleOverlay(displayId) {
   }
   const display =
     screen.getAllDisplays().find((d) => d.id === displayId) || screen.getPrimaryDisplay();
-  overlay = new BrowserWindow({
+  const window = new BrowserWindow({
     x: display.bounds.x,
     y: display.bounds.y,
     width: display.bounds.width,
@@ -22,6 +22,7 @@ function toggleOverlay(displayId) {
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
+    show: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     focusable: false,
@@ -29,10 +30,36 @@ function toggleOverlay(displayId) {
     resizable: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
   });
-  overlay.setIgnoreMouseEvents(true, { forward: true });
-  overlay.setAlwaysOnTop(true, 'screen-saver');
-  overlay.loadURL(base + '/stage?transparent=1&overlay=1');
-  overlay.on('closed', () => (overlay = null));
+  overlay = window;
+  const applyPassThrough = () => {
+    if (window.isDestroyed()) return;
+    window.setFocusable(false);
+    // The entire overlay, including painted piano keys, is display-only.
+    // forward:true is for interactive hover regions and uses a separate Windows
+    // forwarding hook; we do not need that hook or its renderer-lifecycle state.
+    window.setIgnoreMouseEvents(true, { forward: false });
+  };
+  const reveal = () => {
+    if (window.isDestroyed()) return;
+    applyPassThrough();
+    if (!window.isVisible()) window.showInactive();
+    // Chromium may update native styles when first displaying its HWND.
+    applyPassThrough();
+  };
+  window.setAlwaysOnTop(true, 'screen-saver');
+  applyPassThrough();
+  window.on('show', applyPassThrough);
+  window.on('ready-to-show', reveal);
+  window.webContents.on('dom-ready', applyPassThrough);
+  window.webContents.on('did-finish-load', reveal);
+  window.on('focus', () => {
+    applyPassThrough();
+    window.blur();
+  });
+  window.loadURL(base + '/stage?transparent=1&overlay=1');
+  window.on('closed', () => {
+    if (overlay === window) overlay = null;
+  });
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -90,14 +117,12 @@ else {
       if (!url.startsWith(base + '/')) event.preventDefault();
     });
     ipcMain.handle('displays', () =>
-      screen
-        .getAllDisplays()
-        .map((d) => ({
-          id: d.id,
-          label: d.label || `모니터 ${d.id}`,
-          width: d.bounds.width,
-          height: d.bounds.height,
-        })),
+      screen.getAllDisplays().map((d) => ({
+        id: d.id,
+        label: d.label || `모니터 ${d.id}`,
+        width: d.bounds.width,
+        height: d.bounds.height,
+      })),
     );
     ipcMain.handle('overlay', (_, id) => toggleOverlay(id));
     ipcMain.handle('recordings', () => shell.openPath(path.join(__dirname, '../recordings')));

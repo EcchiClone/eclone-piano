@@ -163,3 +163,163 @@ test('explicit export pixelRatio keeps a 1080p canvas exact on a high-DPI displa
     else delete globalThis.devicePixelRatio;
   }
 });
+
+test(
+  'overlay opacity composites whole note and keyboard layers without alpha buildup',
+  { timeout: 30000 },
+  async () => {
+    const { chromium } = await import('@playwright/test');
+    const { readFile, access } = await import('node:fs/promises');
+    const source = await readFile(new URL('../public/engine.js', import.meta.url), 'utf8');
+    let executablePath = process.env.LUMA_TEST_BROWSER;
+    if (!executablePath && process.platform === 'win32') {
+      for (const candidate of [
+        'C:/Program Files/Google/Chrome/Application/chrome.exe',
+        'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+      ]) {
+        try {
+          await access(candidate);
+          executablePath = candidate;
+          break;
+        } catch {}
+      }
+    }
+    const browser = await chromium.launch({ executablePath, headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.route('http://luma-render.test/**', (route) =>
+        route.fulfill({
+          contentType: route.request().url().endsWith('/engine.js')
+            ? 'text/javascript'
+            : 'text/html',
+          body: route.request().url().endsWith('/engine.js')
+            ? source
+            : '<canvas id="piano" width="640" height="360" style="width:640px;height:360px"></canvas>',
+        }),
+      );
+      await page.goto('http://luma-render.test/');
+      const result = await page.evaluate(async () => {
+        const { PianoRenderer } = await import('/engine.js');
+        const canvas = document.getElementById('piano');
+        const state = {
+          background: 'transparent',
+          pixelRatio: 1,
+          minNote: 48,
+          maxNote: 72,
+          keyboard: true,
+          labels: true,
+          particles: true,
+          glow: 1,
+          time: 1,
+          notes: Array.from({ length: 3 }, (_, id) => ({
+            id,
+            note: 60,
+            velocity: 127,
+            channel: 0,
+            start: 0,
+            end: Infinity,
+            release: Infinity,
+          })),
+        };
+        const renderer = new PianoRenderer(canvas, () => state);
+        const capture = (overrides) => {
+          renderer.renderAt(1, overrides);
+          return canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+        };
+        const maxAlpha = (bytes) => {
+          let max = 0;
+          for (let i = 3; i < bytes.length; i += 4) max = Math.max(max, bytes[i]);
+          return max;
+        };
+        const keys = capture({ keyboardOpacity: 0.18, noteOpacity: 0 });
+        const scratch = renderer.layerCanvas;
+        const notes = capture({ keyboardOpacity: 0, noteOpacity: 0.6 });
+        const combined = capture({ keyboardOpacity: 0.18, noteOpacity: 0.6 });
+        const repeated = capture({ keyboardOpacity: 0.18, noteOpacity: 0.6 });
+        let compositionError = 0,
+          repeatedError = 0;
+        for (let i = 3; i < combined.length; i += 4) {
+          const expected = notes[i] + keys[i] * (1 - notes[i] / 255);
+          compositionError = Math.max(compositionError, Math.abs(combined[i] - expected));
+          repeatedError = Math.max(repeatedError, Math.abs(combined[i] - repeated[i]));
+        }
+        const blank = capture({ keyboardOpacity: 0, noteOpacity: 0 });
+        const defaults = capture({ notes: [] });
+        const dark = capture({ background: 'dark', keyboardOpacity: 0.18, noteOpacity: 0.6 });
+        let darkMinimum = 255;
+        for (let i = 3; i < dark.length; i += 4) darkMinimum = Math.min(darkMinimum, dark[i]);
+        const reused = scratch === renderer.layerCanvas;
+        state.pixelRatio = 2;
+        renderer.resize();
+        const scaled = capture({ keyboardOpacity: 0.18, noteOpacity: 0 });
+        const scaledSize = [
+          canvas.width,
+          canvas.height,
+          renderer.layerCanvas.width,
+          renderer.layerCanvas.height,
+        ];
+        renderer.destroy();
+        return {
+          keyMax: maxAlpha(keys),
+          noteMax: maxAlpha(notes),
+          combinedMax: maxAlpha(combined),
+          topAlpha: combined[3],
+          compositionError,
+          repeatedError,
+          blankMax: maxAlpha(blank),
+          defaultMax: maxAlpha(defaults),
+          darkMinimum,
+          reused,
+          scaledMax: maxAlpha(scaled),
+          scaledSize,
+          releasedSize: [scratch.width, scratch.height],
+        };
+      });
+      assert.equal(
+        result.keyMax,
+        46,
+        'Every key fill, highlight, black key and label stays within 18% alpha.',
+      );
+      assert.equal(
+        result.noteMax,
+        153,
+        'Overlapping notes, particles and strike glow stay within 60% alpha.',
+      );
+      assert.equal(result.topAlpha, 0, 'The untouched canvas corner remains fully transparent.');
+      assert.ok(
+        result.compositionError <= 1.1,
+        'Notes composite over keys once, without holes or accumulated group alpha.',
+      );
+      assert.ok(
+        result.combinedMax <= 172,
+        'The two layers overlap using ordinary source-over alpha.',
+      );
+      assert.equal(result.repeatedError, 0, 'Repeated frames do not accumulate opacity.');
+      assert.equal(
+        result.blankMax,
+        0,
+        'Setting both layer opacities to zero also hides strike glows.',
+      );
+      assert.equal(
+        result.defaultMax,
+        255,
+        'Default studio and OBS keyboard opacity remains unchanged.',
+      );
+      assert.equal(
+        result.darkMinimum,
+        255,
+        'Layer compositing does not punch holes in the background.',
+      );
+      assert.equal(
+        result.reused,
+        true,
+        'Both visual groups and subsequent frames reuse one scratch surface.',
+      );
+      assert.equal(result.scaledMax, 46);
+      assert.deepEqual(result.scaledSize, [1280, 720, 1280, 720]);
+      assert.deepEqual(result.releasedSize, [0, 0]);
+    } finally {
+      await browser.close();
+    }
+  },
+);

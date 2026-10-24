@@ -224,6 +224,8 @@ function rounded(ctx, x, y, width, height, radius = 3) {
  * State: time, notes, direction:'up'|'down', theme, background:'dark'|'transparent',
  * particles, glow (0..1), keyboard, labels, minNote, maxNote, secondsVisible.
  * Optional: keyboardHeight (fraction 0.04..0.4), quality (0.5..2), grid, opacity.
+ * noteOpacity and keyboardOpacity (0..1, default 1) fade complete visual groups,
+ * keeping overlapping highlights and repeated notes within the requested alpha.
  * An explicit pixelRatio (0.5..4) overrides both device DPI and quality, letting
  * export canvases keep exact output dimensions regardless of display scaling.
  * `renderAt(time, overrides)` also supports deterministic image/video export.
@@ -240,6 +242,8 @@ export class PianoRenderer {
     this.height = canvas.height || 720;
     this.ratio = 1;
     this.layoutCache = null;
+    this.layerCanvas = null;
+    this.layerContext = null;
     this.resizeObserver =
       typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.resize()) : null;
     this.resizeObserver?.observe(canvas);
@@ -293,6 +297,46 @@ export class PianoRenderer {
   destroy() {
     this.stop();
     this.resizeObserver?.disconnect();
+    if (this.layerCanvas) {
+      this.layerCanvas.width = 0;
+      this.layerCanvas.height = 0;
+      this.layerCanvas = null;
+      this.layerContext = null;
+    }
+  }
+
+  compositeLayer(opacity, draw) {
+    if (opacity <= 0) return;
+    if (opacity >= 1) {
+      draw(this.context);
+      return;
+    }
+    // A single reusable scratch surface isolates group alpha. Setting alpha on
+    // every key fill, highlight and shadow would stack those translucent draws.
+    if (!this.layerCanvas) {
+      this.layerCanvas =
+        typeof OffscreenCanvas !== 'undefined'
+          ? new OffscreenCanvas(this.canvas.width, this.canvas.height)
+          : this.canvas.ownerDocument.createElement('canvas');
+      this.layerContext = this.layerCanvas.getContext('2d', { alpha: true });
+      if (!this.layerContext) throw new Error('Canvas layer rendering is unavailable.');
+    }
+    const layer = this.layerCanvas;
+    if (layer.width !== this.canvas.width) layer.width = this.canvas.width;
+    if (layer.height !== this.canvas.height) layer.height = this.canvas.height;
+    const ctx = this.layerContext;
+    ctx.setTransform(this.ratio, 0, 0, this.ratio, 0, 0);
+    ctx.clearRect(0, 0, this.width, this.height);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    draw(ctx);
+    this.context.save();
+    this.context.globalAlpha *= opacity;
+    this.context.drawImage(layer, 0, 0, this.width, this.height);
+    this.context.restore();
   }
 
   renderAt(time, overrides = {}) {
@@ -307,6 +351,8 @@ export class PianoRenderer {
       minNote: 21,
       maxNote: 108,
       secondsVisible: 6,
+      noteOpacity: 1,
+      keyboardOpacity: 1,
       ...this.getState(),
       ...overrides,
     };
@@ -316,6 +362,8 @@ export class PianoRenderer {
     const h = this.height;
     const theme = THEMES[s.theme] || THEMES.aurora;
     const glow = clamp(finite(s.glow, 0.7), 0, 1);
+    const noteOpacity = clamp(finite(s.noteOpacity, 1), 0, 1);
+    const keyboardOpacity = clamp(finite(s.keyboardOpacity, 1), 0, 1);
     const keyboardHeight = s.keyboard
       ? Math.max(30, h * clamp(finite(s.keyboardHeight, 0.19), 0.04, 0.4))
       : 0;
@@ -352,27 +400,55 @@ export class PianoRenderer {
       visible.push({ note, k, end });
     }
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, w, strike);
-    ctx.clip();
-    for (const item of visible)
-      this.drawNote(
-        ctx,
-        item,
-        t,
-        strike,
-        speed,
-        down,
-        theme,
-        glow,
-        s.labels && layout.whiteWidth > 30,
-      );
-    if (s.particles && glow > 0) this.drawParticles(ctx, active, layout, t, strike, theme, glow);
-    ctx.restore();
-    if (s.keyboard)
-      this.drawKeyboard(ctx, layout, active, strike, keyboardHeight, theme, glow, s.labels, t);
-    this.drawStrike(ctx, w, strike, active, layout, theme, glow);
+    const drawNotes = (target) => {
+      target.save();
+      target.beginPath();
+      target.rect(0, 0, w, strike);
+      target.clip();
+      for (const item of visible)
+        this.drawNote(
+          target,
+          item,
+          t,
+          strike,
+          speed,
+          down,
+          theme,
+          glow,
+          s.labels && layout.whiteWidth > 30,
+        );
+      if (s.particles && glow > 0)
+        this.drawParticles(target, active, layout, t, strike, theme, glow);
+      target.restore();
+    };
+    const drawKeyboard = () => {
+      if (s.keyboard)
+        this.compositeLayer(keyboardOpacity, (target) =>
+          this.drawKeyboard(
+            target,
+            layout,
+            active,
+            strike,
+            keyboardHeight,
+            theme,
+            glow,
+            s.labels,
+            t,
+          ),
+        );
+    };
+    if (noteOpacity < 1) {
+      drawKeyboard();
+      this.compositeLayer(noteOpacity, (target) => {
+        drawNotes(target);
+        this.drawStrike(target, w, strike, active, layout, theme, glow);
+      });
+    } else {
+      // Preserve the direct path and exact drawing order for normal studio/OBS.
+      drawNotes(ctx);
+      drawKeyboard();
+      this.drawStrike(ctx, w, strike, active, layout, theme, glow);
+    }
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
     ctx.globalCompositeOperation = 'source-over';

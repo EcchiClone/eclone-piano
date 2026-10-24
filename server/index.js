@@ -37,6 +37,9 @@ const defaultSettings = {
   maxNote: 108,
   secondsVisible: 6,
   keyboardHeight: 0.19,
+  overlayKeyboard: true,
+  overlayNoteOpacity: 0.6,
+  overlayKeyboardOpacity: 0.18,
 };
 const demo = {
   id: 'demo',
@@ -686,12 +689,14 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
             }[key].includes(p[key])
           )
             settings[key] = p[key];
-        for (const key of ['particles', 'keyboard', 'labels'])
+        for (const key of ['particles', 'keyboard', 'labels', 'overlayKeyboard'])
           if (typeof p[key] === 'boolean') settings[key] = p[key];
         for (const [key, min, max] of [
           ['glow', 0, 1],
           ['secondsVisible', 2, 15],
           ['keyboardHeight', 0.08, 0.35],
+          ['overlayNoteOpacity', 0, 1],
+          ['overlayKeyboardOpacity', 0, 1],
         ])
           if (Number.isFinite(p[key])) settings[key] = Math.min(max, Math.max(min, p[key]));
         if (
