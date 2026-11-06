@@ -20,3 +20,4 @@ await import('./playback-settings.mjs');
 await import('./playback-clock.mjs');
 await import('./playback-owner.mjs');
 await import('./audio-source-refresh.mjs');
+await import('./usability.mjs');

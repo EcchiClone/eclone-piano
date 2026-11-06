@@ -201,6 +201,17 @@ export const THEMES = {
     secondary: [241, 159, 210],
   },
 };
+export function themeFor(settings) {
+  const base = THEMES[settings.theme] || THEMES.aurora;
+  if (!settings.useCustomColor || !/^#[\da-f]{6}$/i.test(settings.customColor || '')) return base;
+  const rgb = [1, 3, 5].map((i) => parseInt(settings.customColor.slice(i, i + 2), 16));
+  return {
+    main: rgb,
+    high: rgb.map((v) => Math.round(v * 0.4 + 255 * 0.6)),
+    low: rgb.map((v) => Math.round(v * 0.48)),
+    secondary: rgb.map((v) => Math.round(v * 0.75 + 45)),
+  };
+}
 const color = (rgb, alpha = 1) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${clamp(alpha, 0, 1)})`;
 const whiteBefore = (note) => {
   let n = 0;
@@ -374,7 +385,7 @@ export class PianoRenderer {
     const ctx = this.context;
     const w = this.width;
     const h = this.height;
-    const theme = THEMES[s.theme] || THEMES.aurora;
+    const theme = themeFor(s);
     const glow = clamp(finite(s.glow, 0.7), 0, 1);
     const noteOpacity = clamp(finite(s.noteOpacity, 1), 0, 1);
     const keyboardOpacity = clamp(finite(s.keyboardOpacity, 1), 0, 1);
@@ -433,6 +444,8 @@ export class PianoRenderer {
         );
       if (s.particles && glow > 0)
         this.drawParticles(target, active, layout, t, strike, theme, glow);
+      if (s.hitStrength > 0)
+        this.drawImpacts(target, active, layout, t, strike, theme, s.hitStrength);
       target.restore();
     };
     const drawKeyboard = () => {
@@ -547,6 +560,32 @@ export class PianoRenderer {
       ctx.font = `600 ${Math.min(12, width * 0.35)}px "Segoe UI",sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillText(noteName(note.note), k.center, Math.min(bottom - 7, top + 17));
+    }
+    ctx.restore();
+  }
+
+  drawImpacts(ctx, active, layout, t, strike, theme, strength) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const [pitch, note] of active) {
+      const age = t - note.start;
+      if (age < 0 || age > 0.42) continue;
+      const key = layout.byNote.get(pitch),
+        progress = age / 0.42;
+      const energy = (clamp(strength, 0, 1) * note.velocity) / 127;
+      ctx.strokeStyle = color(theme.high, (1 - progress) ** 2 * energy * 0.8);
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.ellipse(
+        key.center,
+        strike - 1,
+        key.width * 0.35 + progress * 25,
+        2 + progress * 9,
+        0,
+        Math.PI,
+        Math.PI * 2,
+      );
+      ctx.stroke();
     }
     ctx.restore();
   }

@@ -1382,3 +1382,533 @@ body.viewer .preview-frame canvas {
   justify-content: space-between;
   margin-bottom: 16px;
 }
+
+/* Studio controls: keep the performance and the current task together. */
+[hidden] {
+  display: none !important;
+}
+body:not(.viewer) .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: 68px;
+  gap: 34px;
+  padding: 0 28px;
+}
+body:not(.viewer) .brand {
+  font-size: 18px;
+  letter-spacing: 2.6px;
+}
+body:not(.viewer) .brand-mark {
+  font-size: 35px;
+}
+body:not(.viewer) .workspace {
+  padding: 20px 28px 28px;
+  gap: 24px;
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+body:not(.viewer) .section-heading {
+  margin-bottom: 10px;
+}
+body:not(.viewer) .section-heading .eyebrow {
+  display: none;
+}
+body:not(.viewer) .section-heading h1 {
+  font-size: 23px;
+  margin-bottom: 5px;
+}
+body:not(.viewer) .subtitle {
+  font-size: 11px;
+}
+body:not(.viewer) .connection-strip {
+  min-height: 48px;
+  padding: 10px 0 4px;
+}
+body:not(.viewer) .connection-icon {
+  font-size: 24px;
+}
+body:not(.viewer) .connection-help {
+  margin: 2px 0 12px;
+  color: #91a8b2;
+  font-size: 11px;
+  min-height: 16px;
+}
+body:not(.viewer) .capture-card {
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+body:not(.viewer) .capture-head {
+  margin-bottom: 9px;
+}
+body:not(.viewer) .capture-head .eyebrow {
+  display: none;
+}
+body:not(.viewer) .capture-head h2 {
+  font-size: 12px;
+  margin: 0;
+  font-weight: 600;
+}
+body:not(.viewer) .capture-row {
+  gap: 10px;
+}
+body:not(.viewer) .capture-row label {
+  gap: 5px;
+}
+body:not(.viewer) .capture-row label:last-of-type {
+  flex: 0 0 126px;
+}
+body:not(.viewer) .capture-foot {
+  margin-top: 9px;
+  font-size: 10px;
+  flex-wrap: wrap;
+}
+body:not(.viewer) .capture-foot #recordHint {
+  flex: 1;
+  min-width: 180px;
+}
+body:not(.viewer) .preview-frame {
+  height: clamp(240px, calc(100vh - 480px), 610px);
+  aspect-ratio: auto;
+}
+body:not(.viewer) .preview-frame:fullscreen {
+  height: 100vh;
+  width: 100vw;
+  border: 0;
+  border-radius: 0;
+}
+body:not(.viewer) .transport-bar {
+  height: 62px;
+}
+body:not(.viewer) .transport-title {
+  min-width: 105px;
+  max-width: 27%;
+}
+body:not(.viewer) .transport-title span {
+  line-height: 1.5;
+}
+body:not(.viewer) .settings-panel {
+  position: sticky;
+  top: 84px;
+  display: block;
+  border-color: #30424d;
+}
+body:not(.viewer) .panel-heading {
+  height: 56px;
+  padding: 0 18px;
+}
+body:not(.viewer) .panel-heading .button {
+  padding: 7px 10px;
+  font-size: 11px;
+}
+body:not(.viewer) .setting-section {
+  padding: 19px 18px;
+}
+body:not(.viewer) .setting-label {
+  margin-bottom: 12px;
+}
+body:not(.viewer) .setting-label h3 {
+  font-size: 12px;
+  font-weight: 600;
+}
+body:not(.viewer) .setting-help {
+  font-size: 10px;
+  line-height: 1.65;
+  margin-bottom: 10px;
+  color: #8fa6b1;
+}
+body:not(.viewer) .toggle-row {
+  font-size: 12px;
+  margin: 14px 0;
+}
+body:not(.viewer) .toggle-row small,
+body:not(.viewer) .theme small {
+  color: #8ca1ad;
+  font-size: 10px;
+}
+body:not(.viewer) .segmented button {
+  font-size: 11px;
+}
+body:not(.viewer) .range-label {
+  margin-top: 16px;
+  margin-bottom: 10px;
+  font-size: 11px;
+}
+body:not(.viewer) .range-ends {
+  font-size: 9px;
+}
+body:not(.viewer) .panel-footer {
+  padding: 11px 14px;
+  font-size: 10px;
+  color: #849ba6;
+}
+.preset-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+}
+.preset-toolbar select {
+  min-width: 0;
+  width: 100%;
+  height: 34px;
+  border: 1px solid #3b505b;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #0b1720;
+  color: #cde1e1;
+  font-size: 12px;
+}
+.panel-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 0 14px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.panel-tabs button {
+  padding: 9px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #93a9b5;
+}
+.panel-tabs [aria-selected='true'] {
+  background: #24413c;
+  border-color: #416b60;
+  color: #c3eee1;
+}
+.panel-scroll {
+  max-height: calc(100vh - 295px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #47635f transparent;
+  overscroll-behavior: contain;
+}
+.scene-tools {
+  position: relative;
+  flex: 0 0 30px;
+}
+.scene-tools summary,
+.session-more summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 7px 9px;
+  border: 1px solid #3b505b;
+  border-radius: 5px;
+  font-size: 13px;
+  text-align: center;
+}
+.menu-content {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 7px);
+  z-index: 15;
+  background: #17252f;
+  border: 1px solid #46616b;
+  border-radius: 7px;
+  padding: 6px;
+  min-width: 180px;
+  box-shadow: 0 12px 35px #0006;
+}
+.menu-content button,
+.menu-content a {
+  display: block;
+  border: 0;
+  background: transparent;
+  color: #d6e6e7;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 11px;
+}
+.menu-content button:hover,
+.menu-content a:hover {
+  background: #263e46;
+}
+.custom-color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  font-size: 11px;
+}
+.custom-color-row label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+}
+.custom-color-row input[type='color'] {
+  width: 35px;
+  height: 28px;
+  border: 1px solid #526b73;
+  border-radius: 5px;
+  padding: 2px;
+  background: #12222b;
+  cursor: pointer;
+}
+.custom-color-row span {
+  font:
+    10px Consolas,
+    monospace;
+  color: #9ab3b9;
+}
+.custom-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  font-size: 11px;
+  color: #a7bcc4;
+}
+.custom-range select {
+  width: 100%;
+  margin-top: 6px;
+}
+#fitRange {
+  margin-top: 6px;
+}
+.playback-volume {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 120px;
+  flex: 0 0 120px;
+}
+.playback-volume input {
+  min-width: 34px;
+}
+.playback-volume span {
+  color: #a9bec6;
+  font:
+    9px Consolas,
+    monospace;
+  width: 31px;
+}
+.playback-volume button {
+  font-size: 10px;
+}
+.library-tools {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto;
+  gap: 10px;
+  margin: 18px 0 5px;
+}
+.library-tools input,
+.library-tools select,
+.scene-name input {
+  width: 100%;
+  min-width: 0;
+  background: #0b151e;
+  border: 1px solid #3b505b;
+  border-radius: 6px;
+  height: 36px;
+  padding: 0 11px;
+  color: #cedfe0;
+}
+.library-results {
+  color: #8ea6b2;
+  font-size: 11px;
+  min-height: 16px;
+}
+.scene-name {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+.session-more {
+  position: relative;
+}
+.session-more summary {
+  font-size: 10px;
+  color: #adc7cc;
+}
+body:not(.viewer) .session-actions .delete-button {
+  font-size: 10px;
+  padding: 7px;
+  border-color: transparent;
+}
+body:not(.viewer) .session-card {
+  padding: 13px 15px;
+}
+body:not(.viewer) .session-info strong {
+  font-size: 13px;
+}
+body:not(.viewer) .session-info small {
+  font-size: 11px;
+  color: #94abb6;
+}
+body:not(.viewer) .library {
+  margin-top: 27px;
+}
+.overlay-status {
+  display: inline-block;
+  padding: 4px 8px;
+  margin-bottom: 14px;
+  color: #adc2ca;
+  border: 1px solid #415962;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.overlay-status.active {
+  color: #bdf3d6;
+  background: #24473c;
+  border-color: #549b7a;
+}
+button {
+  transition:
+    background-color 0.16s,
+    border-color 0.16s,
+    color 0.16s,
+    transform 0.12s;
+}
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+body:not(.viewer) .button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+@media (max-width: 1100px) and (min-width: 951px) {
+  body:not(.viewer) .workspace {
+    grid-template-columns: minmax(0, 1fr) 290px;
+    padding-inline: 20px;
+    gap: 18px;
+  }
+  body:not(.viewer) .capture-row {
+    flex-wrap: wrap;
+  }
+  body:not(.viewer) .capture-row .take-name {
+    flex-basis: 40%;
+  }
+  body:not(.viewer) .capture-row .audio-choice {
+    flex-basis: 42%;
+  }
+  body:not(.viewer) .capture-row .record-button {
+    flex: 1;
+  }
+  .playback-volume {
+    width: 93px;
+    flex-basis: 93px;
+  }
+  .playback-volume span {
+    display: none;
+  }
+}
+@media (max-width: 950px) {
+  body:not(.viewer) .workspace {
+    grid-template-columns: 1fr;
+  }
+  body:not(.viewer) .settings-panel {
+    position: static;
+  }
+  .panel-scroll {
+    max-height: 650px;
+  }
+  body:not(.viewer) .preview-frame {
+    height: auto;
+    aspect-ratio: 16/9;
+  }
+}
+@media (max-width: 600px) {
+  body:not(.viewer) .topbar {
+    padding: 0 14px;
+    gap: 10px;
+  }
+  body:not(.viewer) .brand {
+    font-size: 14px;
+    letter-spacing: 1.7px;
+  }
+  body:not(.viewer) .brand small {
+    font-size: 7px;
+  }
+  body:not(.viewer) .workspace {
+    padding: 18px 14px;
+    gap: 20px;
+  }
+  body:not(.viewer) .section-heading h1 {
+    font-size: 21px;
+  }
+  body:not(.viewer) .connection-strip {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  body:not(.viewer) .connection-label {
+    min-width: 110px;
+  }
+  body:not(.viewer) .connection-help {
+    font-size: 10px;
+  }
+  body:not(.viewer) .capture-card {
+    padding: 12px;
+  }
+  body:not(.viewer) .capture-row {
+    flex-wrap: wrap;
+  }
+  body:not(.viewer) .capture-row label:last-of-type {
+    flex: 1 1 44%;
+  }
+  body:not(.viewer) .capture-foot #recordHint {
+    min-width: 100%;
+  }
+  body:not(.viewer) .transport-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+    height: auto;
+    padding-block: 12px;
+  }
+  .playback-volume {
+    flex-basis: 100%;
+    justify-content: flex-end;
+    width: 100%;
+  }
+  .playback-volume input {
+    max-width: 130px;
+  }
+  .library-tools {
+    grid-template-columns: 1fr 1fr;
+  }
+  .library-tools input {
+    grid-column: 1 / -1;
+  }
+  .panel-scroll {
+    max-height: 650px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button,
+  #toast,
+  .switch {
+    transition: none;
+  }
+  .recording .record-dot {
+    animation: none;
+  }
+}
+
+html {
+  scroll-padding-top: 88px;
+}
+#returnLive {
+  width: 47px;
+  font-size: 11px;
+}
+body:not(.viewer) .capture-foot #recordHint {
+  display: inline;
+  color: #8aa6b1;
+}
+.event-count {
+  display: none;
+}
+#audioLevelText {
+  font:
+    10px Consolas,
+    monospace;
+  color: #b8dbca;
+}
+.capture-card.clipping .audio-meter i {
+  background: #f49c83;
+}
+.capture-card.clipping #audioLevelText {
+  color: #ffc2a2;
+}

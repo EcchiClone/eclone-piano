@@ -204,6 +204,7 @@ try {
     defaultOverlayAlpha >= 44 && defaultOverlayAlpha <= 48,
     `Overlay keys must start at18% rather than opaque white; actual alpha=${defaultOverlayAlpha}.`,
   );
+  await page.locator('#overlayTab').click();
   await page.locator('#overlayKeyboardOpacity').evaluate((element) => {
     element.value = '0.08';
     element.dispatchEvent(new Event('input', { bubbles: true }));
@@ -247,6 +248,7 @@ try {
   await desktopOverlay.close();
   await stage.close();
 
+  await page.locator('#sceneTab').click();
   await page.locator('#transparent').uncheck();
   await page.locator('[data-theme="aurora"]').click();
   await page.locator('#noteRange').selectOption('88');

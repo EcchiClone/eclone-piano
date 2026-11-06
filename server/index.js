@@ -11,6 +11,7 @@ import { pipeline } from 'node:stream/promises';
 import { encodeMidi } from './midi-file.js';
 import { mapMidiEventsToAudio } from './audio-clock.js';
 import { projectPaths } from '../shared/paths.cjs';
+import { DEFAULT_SETTINGS, normalizeSettings } from '../public/settings.js';
 import { Performance as MidiPerformance } from '../public/engine.js';
 
 const { root: ROOT, recordings: DEFAULT_DATA } = projectPaths();
@@ -27,23 +28,7 @@ const MIME = {
 };
 const now = () => performance.now() / 1000;
 const AUDIO_SAMPLE_RATES = [44100, 48000];
-const defaultSettings = {
-  theme: 'aurora',
-  background: 'dark',
-  direction: 'up',
-  particles: true,
-  glow: 0.75,
-  keyboard: true,
-  labels: true,
-  minNote: 21,
-  maxNote: 108,
-  secondsVisible: 6,
-  keyboardHeight: 0.19,
-  overlayKeyboard: true,
-  overlayNoteOpacity: 0.6,
-  overlayKeyboardOpacity: 0.18,
-  audioSampleRate: 44100,
-};
+const defaultSettings = DEFAULT_SETTINGS;
 const demo = {
   id: 'demo',
   name: 'First light · 미리보기',
@@ -85,10 +70,9 @@ export async function startServer({
   await fs.mkdir(DATA, { recursive: true });
   let settings = { ...defaultSettings };
   try {
-    settings = {
-      ...settings,
-      ...JSON.parse(await fs.readFile(path.join(DATA, 'settings.json'), 'utf8')),
-    };
+    settings = normalizeSettings(
+      JSON.parse(await fs.readFile(path.join(DATA, 'settings.json'), 'utf8')),
+    );
   } catch {}
   if (!AUDIO_SAMPLE_RATES.includes(settings.audioSampleRate)) settings.audioSampleRate = 44100;
   let rememberedInputName = null,
@@ -928,39 +912,7 @@ export async function startServer({
         bridgeCommand({ type: 'panic' });
         break;
       case 'settings': {
-        const p = msg.settings || {};
-        if (AUDIO_SAMPLE_RATES.includes(p.audioSampleRate))
-          settings.audioSampleRate = p.audioSampleRate;
-        for (const key of ['theme', 'background', 'direction'])
-          if (
-            {
-              theme: ['aurora', 'amber', 'violet'],
-              background: ['dark', 'transparent'],
-              direction: ['up', 'down'],
-            }[key].includes(p[key])
-          )
-            settings[key] = p[key];
-        for (const key of ['particles', 'keyboard', 'labels', 'overlayKeyboard'])
-          if (typeof p[key] === 'boolean') settings[key] = p[key];
-        for (const [key, min, max] of [
-          ['glow', 0, 1],
-          ['secondsVisible', 2, 15],
-          ['keyboardHeight', 0.08, 0.35],
-          ['overlayNoteOpacity', 0, 1],
-          ['overlayKeyboardOpacity', 0, 1],
-        ])
-          if (Number.isFinite(p[key])) settings[key] = Math.min(max, Math.max(min, p[key]));
-        if (
-          [
-            [21, 108],
-            [36, 96],
-            [36, 84],
-            [48, 84],
-          ].some(([min, max]) => p.minNote === min && p.maxNote === max)
-        ) {
-          settings.minNote = p.minNote;
-          settings.maxNote = p.maxNote;
-        }
+        settings = normalizeSettings(msg.settings, settings);
         const serialized = JSON.stringify(settings),
           revision = ++settingsRevision;
         settingsSave = settingsSave

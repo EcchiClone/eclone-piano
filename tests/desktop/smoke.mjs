@@ -15,6 +15,7 @@ try {
   assert.equal(await page.title(), 'EClone Piano — 연주를 빛으로');
   const displays = await page.evaluate(() => window.desktop.displays());
   assert.ok(displays.length > 0);
+  assert.equal((await page.evaluate(() => window.desktop.overlayState())).active, false);
   await page.screenshot({ path: path.join(runtimePaths.screenshots, 'desktop-studio.png') });
   await page.evaluate((id) => window.desktop.overlay(id), displays[0].id);
   const overlay = await app.waitForEvent('window', {
@@ -22,6 +23,13 @@ try {
     timeout: 10000,
   });
   await overlay.waitForFunction(() => document.body.classList.contains('viewer'));
+  await page.waitForFunction(
+    () => document.getElementById('overlayButton').getAttribute('aria-pressed') === 'true',
+  );
+  assert.equal(
+    (await page.evaluate(() => window.desktop.overlayState())).displayId,
+    displays[0].id,
+  );
   await app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find((candidate) =>
       candidate.webContents.getURL().includes('overlay=1'),
@@ -110,6 +118,9 @@ $styles = [ECloneOverlayWindowCheck]::GetWindowLong($windowHandle, -20)
   const closed = overlay.waitForEvent('close');
   await page.evaluate(() => window.desktop.overlay());
   await closed;
+  await page.waitForFunction(
+    () => document.getElementById('overlayButton').getAttribute('aria-pressed') === 'false',
+  );
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   console.log(
     JSON.stringify(

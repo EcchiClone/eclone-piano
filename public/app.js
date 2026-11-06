@@ -1,4 +1,6 @@
 import { Performance, PianoRenderer } from './engine.js';
+import { DEFAULT_SETTINGS, visualSettings, noteLabel } from './settings.js';
+import { loadScenes, saveScene, parseScene, sceneFile, SCENE_STORAGE_KEY } from './presets.js';
 
 const $ = (id) => document.getElementById(id),
   params = new URLSearchParams(location.search),
@@ -6,6 +8,31 @@ const $ = (id) => document.getElementById(id),
 if (viewer) document.body.classList.add('viewer');
 const live = new Performance({ notePolicy: 'piano' }),
   cache = new Map();
+const sceneStorage = {
+  getItem(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  setItem(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      throw new Error('장면 저장이 차단됐거나 공간이 부족해요. 장면 파일로 내보내어 보관하세요.');
+    }
+  },
+};
+let audioDiscovery = null;
+let libraryItems = [],
+  playbackVolume = 1,
+  volumeBeforeMute = 1;
+try {
+  const saved = localStorage.getItem('eclone.playbackVolume');
+  if (saved !== null && Number.isFinite(Number(saved)))
+    playbackVolume = Math.max(0, Math.min(1, Number(saved)));
+} catch {}
 let socket,
   socketClientId = null,
   state = null,
@@ -163,6 +190,7 @@ async function syncSession(initialPosition) {
       if (audioSession !== id) {
         stopAudio();
         audio = new Audio('/media/' + id + '.wav');
+        audio.volume = viewer ? 1 : playbackVolume;
         audio.preload = 'auto';
         audioSession = id;
         const element = audio;
@@ -253,7 +281,7 @@ function connectSocket() {
   socket.onopen = () => {
     if (!viewer) {
       $('serverState').classList.add('online');
-      $('serverState').innerHTML = '<i></i> LOCAL CONNECTED';
+      $('serverState').innerHTML = '<i></i> 앱 연결됨';
     }
     socket.send(JSON.stringify({ type: 'ping', echo: performance.now() / 1000 }));
   };
@@ -319,10 +347,16 @@ function connectSocket() {
     } else if (msg.type === 'audioLevel') {
       if (!viewer) {
         $('audioMeter').style.width = Math.min(100, Math.sqrt(msg.peak) * 100) + '%';
+        const peak = Math.max(0, Number(msg.peak) || 0);
+        $('audioLevelText').textContent =
+          peak > 0.0001 ? (20 * Math.log10(peak)).toFixed(1) + ' dBFS' : '입력 대기';
+        document.querySelector('.capture-card').classList.toggle('clipping', peak >= 0.98);
         if (state?.recording)
           $('recordHint').textContent =
             msg.peak > 0.0001
-              ? 'Kontakt 전용 오디오 수신 중'
+              ? peak >= 0.98
+                ? '입력이 최대치에 가까워요. Kontakt 출력 음량을 낮춰 주세요.'
+                : 'Kontakt 원음 수신 중'
               : '오디오 신호 대기 중 · 소리가 들려도 미터가 조용하면 출력 설정을 확인하세요.';
       }
     } else if (msg.type === 'audioFinal') {
@@ -386,14 +420,21 @@ function updateUI() {
   $('seek').max = currentSession?.duration || 1;
   $('duration').textContent = liveMode ? 'LIVE' : timeText(currentSession?.duration);
   $('playButton').textContent = playbackPlaying() ? 'Ⅱ' : '▶';
-  $('playButton').title = liveMode ? '데모 재생' : '재생 / 일시정지';
+  $('playButton').title = liveMode ? '무음 데모 재생' : playbackPlaying() ? '일시정지' : '재생';
+  $('playButton').setAttribute('aria-label', $('playButton').title);
   $('stageDirection').textContent =
     (liveMode || s.direction === 'up' ? 'RISING' : 'FALLING') +
     (liveMode ? ' · REAL TIME' : ' · PLAYBACK');
   document
     .querySelectorAll('[data-theme]')
-    .forEach((b) => b.classList.toggle('active', b.dataset.theme === s.theme));
-  $('themeName').textContent = { aurora: 'Aurora', amber: 'Golden', violet: 'Violet' }[s.theme];
+    .forEach((b) => b.classList.toggle('active', b.dataset.theme === s.theme && !s.useCustomColor));
+  $('themeName').textContent = s.useCustomColor
+    ? '직접 색상'
+    : { aurora: 'Aurora', amber: 'Golden', violet: 'Violet' }[s.theme];
+  $('useCustomColor').checked = !!s.useCustomColor;
+  if (document.activeElement !== $('customColor')) $('customColor').value = s.customColor;
+  $('customColor').disabled = !s.useCustomColor;
+  $('customColorValue').textContent = s.customColor;
   document.querySelectorAll('[data-direction]').forEach((b) => {
     b.classList.toggle('active', b.dataset.direction === (liveMode ? 'up' : s.direction));
     b.classList.toggle('unavailable', liveMode && b.dataset.direction === 'down');
@@ -405,7 +446,11 @@ function updateUI() {
   $('secondsVisible').value = s.secondsVisible;
   $('audioSampleRate').value = String(s.audioSampleRate ?? 44100);
   $('secondsValue').textContent = Number(s.secondsVisible).toFixed(1) + '초';
-  $('glow').value = s.glow;
+  if (document.activeElement !== $('glow')) $('glow').value = s.glow;
+  for (const key of ['hitStrength', 'keyboardHeight']) {
+    if (document.activeElement !== $(key)) $(key).value = s[key];
+    $(key + 'Value').textContent = Math.round(s[key] * 100) + '%';
+  }
   $('glowValue').textContent = Math.round(s.glow * 100) + '%';
   for (const key of ['particles', 'keyboard', 'labels']) $(key).checked = s[key];
   $('overlayKeyboard').checked = s.overlayKeyboard !== false;
@@ -417,7 +462,13 @@ function updateUI() {
     $(key + 'Value').textContent = Math.round((s[key] ?? fallback) * 100) + '%';
   }
   $('transparent').checked = s.background === 'transparent';
-  $('noteRange').value = String(s.maxNote - s.minNote + 1);
+  const range =
+    { '21:108': '88', '36:96': '61', '36:84': '49', '48:84': '37' }[s.minNote + ':' + s.maxNote] ||
+    'custom';
+  if ($('noteRange').value !== 'custom' || range === 'custom') $('noteRange').value = range;
+  $('customRange').hidden = $('noteRange').value !== 'custom';
+  $('minNote').value = s.minNote;
+  $('maxNote').value = s.maxNote;
   $('stageKeys').textContent = s.maxNote - s.minNote + 1 + ' KEYS';
   document
     .querySelector('.preview-frame')
@@ -437,6 +488,7 @@ function updateUI() {
   if (state.midiStatus.connected && state.midiStatus.inputId != null)
     $('midiInput').value = state.midiStatus.inputId;
   $('connectButton').textContent = state.midiStatus.connected ? '연결 해제' : '연결';
+  $('connectButton').disabled = !state.midiStatus.connected && !state.ports.inputs.length;
   $('midiInput').disabled = state.midiStatus.connected;
   $('midiStatus').textContent = state.midiStatus.connected
     ? '입력 연결됨'
@@ -444,6 +496,14 @@ function updateUI() {
       ? '연결 확인 필요'
       : '연결되지 않음';
   $('midiStatus').title = state.midiStatus.error || '';
+  $('connectionHelp').textContent =
+    state.midiStatus.error ||
+    (state.midiStatus.connected
+      ? '건반과 페달을 눌렀다 떼며 노트가 끝나는지 확인하세요.'
+      : 'MIDI 입력을 선택해 연결하세요. 소리를 내려면 Kontakt나 외부 음원이 필요합니다.');
+  const volumeAvailable = !liveMode && !demoMode && !!currentSession?.hasAudio;
+  $('playbackVolume').disabled = !volumeAvailable;
+  $('muteAudio').disabled = !volumeAvailable;
   $('midiLight').classList.toggle('connected', state.midiStatus.connected);
   $('eventCount').textContent = count.toLocaleString() + ' events';
   $('recordButton').classList.toggle('recording', !!state.recording);
@@ -463,10 +523,16 @@ function updateUI() {
   $('audioSampleRate').disabled = busy || !$('withAudio').checked;
   $('demoButton').disabled = busy;
   $('playButton').disabled = busy;
+  $('audioLevelText').hidden = !state.recording?.withAudio;
+  $('captureFormat').textContent = $('withAudio').checked ? 'MIDI + 원음 WAV' : 'MIDI 시각화';
   if (!busy) {
+    document.querySelector('.capture-card').classList.remove('clipping');
     $('audioMeter').style.width = '0';
-    $('recordHint').textContent =
-      '연주 데이터와 원음을 따로 보관해 언제든 다시 스타일링할 수 있어요.';
+    $('recordHint').textContent = $('withAudio').checked
+      ? audioDiscovery === 0
+        ? 'Kontakt를 찾지 못했어요. MIDI만 저장하려면 원음 녹음을 해제하세요.'
+        : 'Kontakt와 같은 샘플레이트인지 확인하세요. 원음은 녹음 중에 확인할 수 있습니다.'
+      : 'MIDI만 저장합니다. 다시 재생하거나 영상으로 내보낼 때 소리는 포함되지 않습니다.';
   }
 }
 async function loadAudio({ strict = false } = {}) {
@@ -495,9 +561,14 @@ async function loadAudio({ strict = false } = {}) {
     $('audioProcess').innerHTML =
       (choice ? '' : `<option value="">${placeholder}</option>`) +
       processes
-        .map((p) => `<option value="${p.pid}">${escape(p.name)} · ${p.pid}</option>`)
+        .map(
+          (p) =>
+            `<option value="${p.pid}">${escape(p.name)}${processes.length > 1 ? ' · PID ' + p.pid : ''}</option>`,
+        )
         .join('');
     $('audioProcess').value = choice;
+    audioDiscovery = processes.length;
+    updateUI();
     return { pid: Number(choice) || null, count: processes.length };
   } catch (error) {
     if (revision === audioLoadRevision)
@@ -516,22 +587,50 @@ async function loadAudio({ strict = false } = {}) {
     clearTimeout(timeout);
   }
 }
+function renderLibrary() {
+  const query = $('librarySearch').value.trim().toLocaleLowerCase();
+  const filter = $('libraryFilter').value,
+    sort = $('librarySort').value;
+  const items = libraryItems
+    .filter(
+      (s) =>
+        s.name.toLocaleLowerCase().includes(query) &&
+        (filter === 'all' || (filter === 'audio' ? s.hasAudio : !s.hasAudio)),
+    )
+    .sort((a, b) =>
+      sort === 'name'
+        ? a.name.localeCompare(b.name, 'ko')
+        : sort === 'duration'
+          ? b.duration - a.duration
+          : new Date(b.createdAt) - new Date(a.createdAt),
+    );
+  $('sessionCount').textContent = libraryItems.length;
+  $('libraryCount').textContent = libraryItems.length;
+  $('libraryResults').textContent =
+    query || filter !== 'all' ? items.length + '개 표시 · 전체 ' + libraryItems.length + '개' : '';
+  $('sessionList').innerHTML = items.length
+    ? items
+        .map(
+          (s) =>
+            `<article class="session-card"><div class="session-icon">♩</div><div class="session-info"><strong title="${escape(s.name)}">${escape(s.name)}</strong><small>${new Date(s.createdAt).toLocaleDateString('ko-KR')} · ${timeText(s.duration)} · ${s.hasAudio ? '원음 포함' : '시각화만'}</small></div><div class="session-actions"><button class="button outline" data-play="${s.id}">▷ 재생</button><button class="button export-button" data-export="${s.id}">영상 내보내기</button><details class="session-more"><summary aria-label="${escape(s.name)} 다운로드">다운로드</summary><div class="menu-content"><a href="/api/midi/${s.id}" download="performance.mid">MIDI 파일</a>${s.hasAudio ? `<a href="/media/${s.id}.wav" download>원음 WAV</a>` : ''}<a href="/media/${s.id}.session.json" download>세션 JSON</a></div></details><button class="button delete-button" data-delete="${s.id}" data-name="${escape(s.name)}" aria-label="${escape(s.name)} 삭제">삭제</button></div></article>`,
+        )
+        .join('')
+    : '<div class="library-empty">' +
+      (libraryItems.length
+        ? '조건에 맞는 연주가 없어요. 검색어나 종류를 바꿔 보세요.'
+        : '저장한 연주가 없어요. 위에서 짧게 녹음해 보세요.') +
+      '</div>';
+}
 async function loadLibrary() {
   if (viewer) return;
   try {
-    const response = await fetch('/api/sessions'),
-      items = await response.json();
-    $('sessionCount').textContent = items.length;
-    $('libraryCount').textContent = items.length;
-    $('sessionList').innerHTML = items.length
-      ? items
-          .map(
-            (s) =>
-              `<article class="session-card"><div class="session-icon">♩</div><div class="session-info"><strong>${escape(s.name)}</strong><small>${new Date(s.createdAt).toLocaleDateString('ko-KR')} · ${timeText(s.duration)} · ${s.hasAudio ? 'MIDI + WAV' : 'MIDI'} · ${s.eventCount} events</small></div><div class="session-actions"><a href="/api/midi/${s.id}" download="performance.mid">MIDI</a>${s.hasAudio ? `<a href="/media/${s.id}.wav" download>WAV</a>` : ''}<a href="/media/${s.id}.session.json" download>세션</a><button class="button outline" data-play="${s.id}">▷ 재생</button><button class="button export-button" data-export="${s.id}">영상 내보내기</button><button class="button delete-button" data-delete="${s.id}" data-name="${escape(s.name)}">삭제</button></div></article>`,
-          )
-          .join('')
-      : '<div class="library-empty">아직 담아 둔 연주가 없어요. 첫 연주를 녹음해 보세요.</div>';
-  } catch (error) {
+    const response = await fetch('/api/sessions');
+    if (!response.ok) throw new Error();
+    libraryItems = (await response.json())
+      .filter((s) => typeof s.id === 'string')
+      .map((s) => ({ ...s, name: typeof s.name === 'string' ? s.name : '이름 없는 연주' }));
+    renderLibrary();
+  } catch {
     toast('저장된 연주 목록을 읽지 못했습니다.', 'error');
   }
 }
@@ -696,8 +795,17 @@ if (!viewer) {
               : position(),
       });
   };
-  $('returnLive').onclick = $('liveTab').onclick = () => send({ type: 'live' });
-  $('libraryTab').onclick = () => $('library').scrollIntoView({ behavior: 'smooth' });
+  $('returnLive').onclick = () => send({ type: 'live' });
+  $('liveTab').onclick = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    $('liveTab').classList.add('active');
+    $('libraryTab').classList.remove('active');
+  };
+  $('libraryTab').onclick = () => {
+    $('library').scrollIntoView({ behavior: 'smooth' });
+    $('libraryTab').classList.add('active');
+    $('liveTab').classList.remove('active');
+  };
   $('seek').oninput = () => send({ type: 'seek', position: Number($('seek').value) });
   $('connectButton').onclick = () => {
     if (state?.midiStatus.connected) send({ type: 'disconnect' });
@@ -709,7 +817,9 @@ if (!viewer) {
   $('panicButton').onclick = () => send({ type: 'panic' });
   document
     .querySelectorAll('[data-theme]')
-    .forEach((b) => (b.onclick = () => setSettings({ theme: b.dataset.theme })));
+    .forEach(
+      (b) => (b.onclick = () => setSettings({ theme: b.dataset.theme, useCustomColor: false })),
+    );
   document.querySelectorAll('[data-direction]').forEach(
     (b) =>
       (b.onclick = () => {
@@ -720,21 +830,206 @@ if (!viewer) {
         setSettings({ direction: b.dataset.direction });
       }),
   );
-  for (const key of ['particles', 'keyboard', 'labels', 'overlayKeyboard'])
+  for (const key of ['particles', 'keyboard', 'labels', 'overlayKeyboard', 'useCustomColor'])
     $(key).onchange = () => setSettings({ [key]: $(key).checked });
-  for (const key of ['secondsVisible', 'glow', 'overlayNoteOpacity', 'overlayKeyboardOpacity'])
-    $(key).oninput = () => setSettings({ [key]: Number($(key).value) });
+  for (const key of [
+    'secondsVisible',
+    'glow',
+    'overlayNoteOpacity',
+    'overlayKeyboardOpacity',
+    'hitStrength',
+    'keyboardHeight',
+  ])
+    $(key).oninput = () => {
+      const value = Number($(key).value);
+      if ($(key + 'Value'))
+        $(key + 'Value').textContent =
+          key === 'secondsVisible' ? value.toFixed(1) + '초' : Math.round(value * 100) + '%';
+      setSettings({ [key]: value });
+    };
   $('transparent').onchange = () =>
     setSettings({ background: $('transparent').checked ? 'transparent' : 'dark' });
-  $('noteRange').onchange = () =>
-    setSettings(
-      {
-        37: { minNote: 48, maxNote: 84 },
-        49: { minNote: 36, maxNote: 84 },
-        61: { minNote: 36, maxNote: 96 },
-        88: { minNote: 21, maxNote: 108 },
-      }[$('noteRange').value],
+  $('noteRange').onchange = () => {
+    $('customRange').hidden = $('noteRange').value !== 'custom';
+    const range = {
+      37: { minNote: 48, maxNote: 84 },
+      49: { minNote: 36, maxNote: 84 },
+      61: { minNote: 36, maxNote: 96 },
+      88: { minNote: 21, maxNote: 108 },
+    }[$('noteRange').value];
+    if (range) setSettings(range);
+  };
+  for (const [id, first, last] of [
+    ['minNote', 0, 126],
+    ['maxNote', 1, 127],
+  ])
+    $(id).innerHTML = Array.from(
+      { length: last - first + 1 },
+      (_, i) => '<option value="' + (i + first) + '">' + noteLabel(i + first) + '</option>',
+    ).join('');
+  for (const id of ['minNote', 'maxNote'])
+    $(id).onchange = () => {
+      let minNote = Number($('minNote').value),
+        maxNote = Number($('maxNote').value);
+      if (minNote >= maxNote) {
+        if (id === 'minNote') maxNote = Math.min(127, minNote + 12);
+        else minNote = Math.max(0, maxNote - 12);
+      }
+      setSettings({ minNote, maxNote });
+    };
+  $('fitRange').onclick = () => {
+    const notes = state?.transport.mode === 'live' ? live.notes : replay.notes;
+    if (!notes.length) return toast('먼저 몇 음을 연주하거나 저장한 연주를 열어 주세요.');
+    const [low, high] = notes.reduce(
+      ([lo, hi], n) => [Math.min(lo, n.note), Math.max(hi, n.note)],
+      [127, 0],
     );
+    const minNote = Math.max(0, Math.floor(low / 12) * 12),
+      maxNote = Math.min(127, Math.max(minNote + 12, Math.ceil(high / 12) * 12));
+    setSettings({ minNote, maxNote });
+    toast('연주한 음이 들어오도록 표시 범위를 맞췄어요.');
+  };
+  $('customColor').oninput = () =>
+    setSettings({ customColor: $('customColor').value, useCustomColor: true });
+  function panel(name) {
+    $('appearancePanel').hidden = name !== 'scene';
+    $('overlayPanel').hidden = name !== 'overlay';
+    $('sceneTab').setAttribute('aria-selected', String(name === 'scene'));
+    $('overlayTab').setAttribute('aria-selected', String(name === 'overlay'));
+    $('sceneTab').tabIndex = name === 'scene' ? 0 : -1;
+    $('overlayTab').tabIndex = name === 'overlay' ? 0 : -1;
+    $('panelScope').textContent =
+      name === 'scene'
+        ? '장면 디자인은 OBS와 영상에도 반영됩니다.'
+        : '이 탭의 설정은 데스크톱 오버레이에만 적용됩니다.';
+  }
+  $('sceneTab').onclick = () => panel('scene');
+  $('overlayTab').onclick = () => panel('overlay');
+  for (const [name, other] of [
+    ['scene', 'overlay'],
+    ['overlay', 'scene'],
+  ])
+    $(name + 'Tab').onkeydown = (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        panel(other);
+        $(other + 'Tab').focus();
+      }
+    };
+  for (const id of ['librarySearch', 'libraryFilter', 'librarySort'])
+    $(id).addEventListener(id === 'librarySearch' ? 'input' : 'change', renderLibrary);
+  function volume(value) {
+    playbackVolume = Math.max(0, Math.min(1, value));
+    if (playbackVolume) volumeBeforeMute = playbackVolume;
+    if (audio) audio.volume = viewer ? 1 : playbackVolume;
+    $('playbackVolume').value = playbackVolume;
+    $('playbackVolumeValue').textContent = Math.round(playbackVolume * 100) + '%';
+    $('muteAudio').textContent = playbackVolume ? '음량' : '음소거';
+    $('muteAudio').setAttribute('aria-pressed', String(playbackVolume === 0));
+    try {
+      localStorage.setItem('eclone.playbackVolume', String(playbackVolume));
+    } catch {}
+  }
+  $('playbackVolume').oninput = () => volume(Number($('playbackVolume').value));
+  $('muteAudio').onclick = () => volume(playbackVolume ? 0 : volumeBeforeMute || 1);
+  volume(playbackVolume);
+  function scenes(selected = $('sceneSelect').value) {
+    const list = loadScenes(sceneStorage);
+    $('sceneSelect').innerHTML =
+      '<option value="">저장한 장면</option>' +
+      list
+        .map((s) => '<option value="' + escape(s.name) + '">' + escape(s.name) + '</option>')
+        .join('');
+    $('sceneSelect').value = selected;
+    $('deleteScene').disabled = !$('sceneSelect').value;
+  }
+  scenes();
+  $('sceneSelect').onchange = () => {
+    const scene = loadScenes(sceneStorage).find((s) => s.name === $('sceneSelect').value);
+    if (scene) {
+      setSettings(scene.settings);
+      toast(scene.name + ' 장면을 적용했어요.');
+    }
+    scenes();
+  };
+  $('saveScene').onclick = () => {
+    $('sceneName').value = $('sceneSelect').value;
+    $('sceneDialog').showModal();
+    $('sceneName').focus();
+  };
+  $('confirmSceneSave').onclick = () => {
+    try {
+      const name = $('sceneName').value.trim();
+      saveScene(sceneStorage, { name, settings: state.settings });
+      scenes(name);
+      $('sceneDialog').close();
+      toast('장면을 저장했어요.');
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  };
+  $('sceneName').onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      $('confirmSceneSave').click();
+    }
+  };
+  $('deleteScene').onclick = () => {
+    const name = $('sceneSelect').value;
+    if (!name) return;
+    try {
+      sceneStorage.setItem(
+        SCENE_STORAGE_KEY,
+        JSON.stringify(loadScenes(sceneStorage).filter((s) => s.name !== name)),
+      );
+      scenes('');
+      document.querySelector('.scene-tools').open = false;
+      toast('저장 목록에서 장면을 지웠어요. 현재 디자인은 계속 사용할 수 있습니다.');
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  };
+  $('resetAppearance').onclick = () => {
+    setSettings(visualSettings(DEFAULT_SETTINGS));
+    scenes('');
+    document.querySelector('.scene-tools').open = false;
+    toast('기본 디자인을 적용했어요.');
+  };
+  $('exportScene').onclick = () => {
+    const blob = new Blob([sceneFile($('sceneSelect').value || '나의 장면', state.settings)], {
+      type: 'application/json',
+    });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = 'eclone-scene.json';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    document.querySelector('.scene-tools').open = false;
+  };
+  $('importScene').onclick = () => $('sceneFile').click();
+  $('sceneFile').onchange = async () => {
+    try {
+      const file = $('sceneFile').files[0];
+      if (!file) return;
+      if (file.size > 65536) throw new Error('장면 파일은 64KB 이하로 선택하세요.');
+      const scene = parseScene(await file.text());
+      const base = scene.name;
+      let suffix = 2;
+      const existing = loadScenes(sceneStorage);
+      while (existing.some((saved) => saved.name === scene.name))
+        scene.name = base.slice(0, 50) + ' (' + suffix++ + ')';
+      saveScene(sceneStorage, scene);
+      setSettings(scene.settings);
+      scenes(scene.name);
+      toast('장면을 가져왔어요.');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      $('sceneFile').value = '';
+      document.querySelector('.scene-tools').open = false;
+    }
+  };
   $('fullscreenButton').onclick = () => {
     const frame = document.querySelector('.preview-frame');
     if (document.fullscreenElement) document.exitFullscreen();
@@ -852,6 +1147,35 @@ if (!viewer) {
     $('licensesButton').hidden = false;
     $('licensesButton').onclick = () => window.desktop.licenses();
   }
+  if (window.desktop?.overlayState) {
+    const showOverlay = (info) => {
+      $('overlayButton').textContent = info.active ? '오버레이 끄기' : '오버레이 켜기';
+      $('overlayButton').setAttribute('aria-pressed', String(info.active));
+      $('overlayStatus').textContent = info.active ? '표시 중 · 클릭 통과' : '꺼짐';
+      $('overlayStatus').classList.toggle('active', info.active);
+    };
+    window.desktop.overlayState().then(showOverlay);
+    const unsubscribe = window.desktop.onOverlayState(showOverlay);
+    window.addEventListener('beforeunload', () => unsubscribe(), { once: true });
+  }
+  if (!window.desktop) {
+    $('overlayButton').disabled = true;
+    $('overlayButton').textContent = '데스크톱 앱에서 켜기';
+    $('overlayStatus').textContent = '설치 앱에서 사용';
+  }
+  for (const id of [
+    'secondsVisible',
+    'glow',
+    'hitStrength',
+    'keyboardHeight',
+    'customColor',
+    'overlayNoteOpacity',
+    'overlayKeyboardOpacity',
+  ])
+    $(id).addEventListener('blur', updateUI);
+  window.addEventListener('storage', (event) => {
+    if (event.key === SCENE_STORAGE_KEY) scenes();
+  });
   $('cancelExport').onclick = () => {
     if (exportAbort) exportAbort();
     else $('exportDialog').close();
@@ -862,10 +1186,32 @@ if (!viewer) {
       exportAbort?.();
     }
   });
+  document.addEventListener('click', (event) => {
+    for (const menu of document.querySelectorAll(
+      'details.scene-tools[open], details.session-more[open]',
+    ))
+      if (!menu.contains(event.target)) menu.open = false;
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+    for (const menu of document.querySelectorAll(
+      'details.scene-tools[open], details.session-more[open]',
+    )) {
+      menu.open = false;
+      if (menu.contains(document.activeElement)) menu.querySelector('summary').focus();
+      e.preventDefault();
+    }
+  });
   document.addEventListener('keydown', (e) => {
     if (
       e.code === 'Space' &&
-      !['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(e.target.tagName) &&
+      !e.repeat &&
+      !e.defaultPrevented &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      !e.metaKey &&
+      !e.target.isContentEditable &&
+      !['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'SUMMARY'].includes(e.target.tagName) &&
       !document.querySelector('dialog[open]')
     ) {
       e.preventDefault();

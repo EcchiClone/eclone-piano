@@ -191,6 +191,22 @@ try {
   });
   await page.goto(base);
   await page.waitForFunction(() => window.ecloneDiagnostics()?.mode === 'live');
+  await page.locator('#useCustomColor').check();
+  await page.locator('#customColor').fill('#ff8866');
+  await page.locator('#hitStrength').evaluate((element) => {
+    element.value = '0.8';
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.waitForFunction(
+    () =>
+      window.ecloneDiagnostics().settings.customColor === '#ff8866' &&
+      window.ecloneDiagnostics().settings.useCustomColor &&
+      window.ecloneDiagnostics().settings.hitStrength === 0.8,
+  );
+  await page.locator('#playbackVolume').evaluate((element) => {
+    element.value = '0';
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   await page.locator(`[data-export="${id}"]`).click();
   await page.waitForFunction(() => !document.getElementById('exportDownload').hidden, null, {
     timeout: 90000,

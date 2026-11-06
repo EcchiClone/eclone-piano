@@ -11,6 +11,12 @@ app.setName('EClone Piano');
 if (process.env.ECLONE_USER_DATA_DIR)
   app.setPath('userData', path.resolve(process.env.ECLONE_USER_DATA_DIR));
 const base = 'http://127.0.0.1:3210';
+function overlayState() {
+  return { active: !!overlay && !overlay.isDestroyed(), displayId: overlay?.displayId ?? null };
+}
+function publishOverlayState() {
+  if (studio && !studio.isDestroyed()) studio.webContents.send('overlay-state', overlayState());
+}
 function toggleOverlay(displayId) {
   if (overlay && !overlay.isDestroyed()) {
     overlay.close();
@@ -36,6 +42,8 @@ function toggleOverlay(displayId) {
     webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
   });
   overlay = window;
+  window.displayId = display.id;
+  publishOverlayState();
   const applyPassThrough = () => {
     if (window.isDestroyed()) return;
     window.setFocusable(false);
@@ -64,6 +72,7 @@ function toggleOverlay(displayId) {
   window.loadURL(base + '/stage?transparent=1&overlay=1');
   window.on('closed', () => {
     if (overlay === window) overlay = null;
+    publishOverlayState();
   });
 }
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -138,6 +147,7 @@ else {
       })),
     );
     ipcMain.handle('overlay', (_, id) => toggleOverlay(id));
+    ipcMain.handle('overlayState', () => overlayState());
     ipcMain.handle('recordings', () => shell.openPath(paths.recordings));
     ipcMain.handle('appInfo', () => ({
       version: app.getVersion(),
