@@ -1,6 +1,6 @@
 # EClone Piano 개발
 
-[README](../README.md) · [설치와 연결](SETUP.md)
+[README](../README.md) · [설치와 연결](SETUP.md) · [Windows 배포](RELEASING.md)
 
 ## 구조
 

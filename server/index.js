@@ -13,7 +13,7 @@ import { mapMidiEventsToAudio } from './audio-clock.js';
 import { projectPaths } from '../shared/paths.cjs';
 import { Performance as MidiPerformance } from '../public/engine.js';
 
-const { root: ROOT, recordings: DEFAULT_DATA, midiScript, audioHelper: helper } = projectPaths();
+const { root: ROOT, recordings: DEFAULT_DATA } = projectPaths();
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -74,7 +74,13 @@ for (let bar = 0; bar < 8; bar++) {
 }
 demo.events.sort((a, b) => a.t - b.t);
 
-export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DATA } = {}) {
+export async function startServer({
+  port = 3210,
+  onOverlay,
+  dataDir = DEFAULT_DATA,
+  paths = projectPaths(),
+} = {}) {
+  const { midiScript, audioHelper: helper, audioCommand, audioArgs } = paths;
   const DATA = path.resolve(dataDir);
   await fs.mkdir(DATA, { recursive: true });
   let settings = { ...defaultSettings };
@@ -534,10 +540,12 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       return {
         supported: false,
         processes: [],
-        error: '오디오 도우미를 빌드하세요: npm run build:audio',
+        error: paths.bundled
+          ? '오디오 구성요소가 없습니다. 앱을 다시 설치해 주세요.'
+          : '오디오 도우미를 빌드하세요: npm run build:audio',
       };
     return await new Promise((resolve) => {
-      const child = spawn('dotnet', [helper, '--list'], { windowsHide: true });
+      const child = spawn(audioCommand, [...audioArgs, '--list'], { windowsHide: true });
       let result = '',
         settled = false;
       const finish = (value, kill = false) => {
@@ -607,9 +615,9 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       if (!run.ready) rejectReady(run.error);
     };
     const child = (run.child = spawn(
-      'dotnet',
+      audioCommand,
       [
-        helper,
+        ...audioArgs,
         '--pid',
         String(pid),
         '--output',
@@ -763,7 +771,12 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     try {
       let startedAt = requestedAt;
       if (payload.withAudio) {
-        if (!existsSync(helper)) throw new Error('오디오 도우미를 빌드한 뒤 다시 시도하세요.');
+        if (!existsSync(helper))
+          throw new Error(
+            paths.bundled
+              ? '오디오 구성요소가 없습니다. 앱을 다시 설치해 주세요.'
+              : '오디오 도우미를 빌드한 뒤 다시 시도하세요.',
+          );
         if (!Number.isInteger(payload.pid) || payload.pid <= 0)
           throw new Error('녹음할 Kontakt 프로세스를 선택하세요.');
         const sampleRate = payload.sampleRate ?? settings.audioSampleRate;
@@ -1055,7 +1068,11 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         stderr = '',
         spawnError,
         timer;
-      const proc = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const proc = spawn(
+        command === 'ffmpeg' ? paths.ffmpeg : command === 'ffprobe' ? paths.ffprobe : command,
+        args,
+        { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
+      );
       if (upload) upload.process = proc;
       proc.stdout.on('data', (data) => {
         if (stdout.length < 262144) stdout += data;
@@ -1442,7 +1459,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
         }
         upload.conversion = new Promise((resolve) => {
           const proc = (upload.process = spawn(
-            'ffmpeg',
+            paths.ffmpeg,
             [
               '-hide_banner',
               '-loglevel',

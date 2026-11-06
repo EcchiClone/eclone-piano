@@ -1,0 +1,49 @@
+appId: games.eclone.piano
+productName: EClone Piano
+copyright: Copyright © 2026 EClone Games
+asar: true
+directories:
+  output: dist
+  buildResources: build
+files:
+  - desktop/**/*
+  - public/**/*
+  - server/**/*
+  - shared/**/*
+  - package.json
+  - LICENSE
+extraResources:
+  - from: .runtime/distribution/stage/native
+    to: native
+  - from: native/midi
+    to: native/midi
+    filter: ['*.cs', '*.ps1']
+  - from: .runtime/distribution/stage/media
+    to: media
+  - from: .runtime/distribution/stage/licenses
+    to: licenses
+  - from: docs/END_USER.md
+    to: Quick Start.md
+artifactName: EClone-Piano-${version}-Windows-${arch}.${ext}
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+nsis:
+  artifactName: EClone-Piano-${version}-Windows-${arch}-Setup.exe
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: EClone Piano
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  installerLanguages: [en_US, ko_KR]
+  language: '1042'
+  license: LICENSE
+publish: null

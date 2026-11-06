@@ -2,6 +2,8 @@
 
 [README로 돌아가기](../README.md)
 
+일반 사용자는 **[Windows 설치본 가이드](END_USER.md)**를 먼저 보세요. Releases의 Setup.exe에는 실행 런타임과 오디오·영상 도구가 포함되어 있습니다. 아래 Node.js·.NET·FFmpeg 설치 단계는 소스 실행을 위한 절차입니다. MIDI·Kontakt 연결 순서는 설치본에서도 같습니다.
+
 ## 1. 필요한 구성부터 고르기
 
 - **데모·화면 확인:** Windows x64, Node.js 22 이상, `npm ci`.

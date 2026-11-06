@@ -4,7 +4,7 @@
 
 A local MIDI visualization and performance recording studio for Windows. Create transparent OBS scenes, replay and restyle performances, and enjoy a click-through desktop overlay.
 
-[![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4)](#준비물)
+[![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4)](#windows-설치)
 [![License: MIT](https://img.shields.io/badge/License-MIT-teal.svg)](LICENSE)
 [![Checks](https://github.com/EcchiClone/eclone-piano/actions/workflows/checks.yml/badge.svg)](https://github.com/EcchiClone/eclone-piano/actions/workflows/checks.yml)
 
@@ -28,7 +28,15 @@ _스크린샷은 앱에서 만든 데모 장면입니다. 데모는 무음이며
 
 > **지원 범위:** 일반 MIDI 입력으로 시각화할 수 있습니다. 원음 녹음은 현재 **Kontakt 독립 실행 앱**을 대상으로 하며 Kontakt 7에서 확인했습니다. DAW 안의 Kontakt 플러그인, 임의의 다른 앱 오디오, ASIO 직접 캡처는 지원하지 않습니다. 음원·가상악기를 내장한 프로그램은 아닙니다.
 
-## 준비물
+## Windows 설치
+
+**[GitHub Releases에서 다운로드](https://github.com/EcchiClone/eclone-piano/releases/latest)** → **Windows-x64-Setup.exe**를 실행하세요. 설치 없이 실행하려면 Windows-x64.zip 전체를 압축 해제하고 EClone Piano.exe를 엽니다.
+
+Electron·Node.js·.NET 오디오 도우미·FFmpeg·FFprobe가 포함되어 개발 도구를 따로 설치하지 않아도 됩니다. 업데이트된 Windows 10 22H2 / Windows 11 x64를 지원합니다. Kontakt·피아노 음원·건반 드라이버·loopMIDI는 별도로 준비합니다. **[설치본 사용자 가이드](docs/END_USER.md)**
+
+서명 인증서가 없는 배포본이며, SHA256SUMS.txt로 파일을 확인할 수 있습니다. 앱은 사용자 폴더에 연주를 보관하므로 업데이트 시 프로그램 파일을 교체할 수 있습니다.
+
+## 소스에서 실행할 때의 준비물
 
 처음 설치할 때 인터넷이 필요합니다. 설치 후 연주·녹음·재생은 로컬에서 동작합니다.
 
@@ -46,7 +54,7 @@ _스크린샷은 앱에서 만든 데모 장면입니다. 데모는 무음이며
 
 **MIDI 화면만 먼저 보고 싶다면:** Windows와 Node.js로 앱을 실행한 뒤 **데모 미리보기**를 누르세요. .NET·Kontakt·loopMIDI·FFmpeg·OBS는 데모에 필요하지 않습니다. 실제 MIDI 시각화도 .NET 없이 사용할 수 있습니다.
 
-## 빠른 시작
+## 소스에서 실행하기 (개발용)
 
 1. [저장소](https://github.com/EcchiClone/eclone-piano)의 **Code → Download ZIP**을 내려받아 쓰기 가능한 폴더에 압축을 풉니다. 또는 Git을 사용합니다.
 
@@ -140,7 +148,7 @@ OBS **소스 → + → 브라우저**에서 `로컬 파일`을 끄고 설정합�
 
 ## 연주 파일과 백업
 
-프로젝트의 **`recordings/`**에 저장합니다. 앱의 **저장 폴더** 버튼으로 열 수 있습니다.
+**설치본·ZIP은 `%APPDATA%\EClone Piano\recordings`**, 소스 실행은 프로젝트의 **`recordings/`**에 저장합니다. 앱의 **저장 폴더** 버튼으로 열 수 있습니다.
 
 | 파일                               | 내용                                               |
 | ---------------------------------- | -------------------------------------------------- |
@@ -172,7 +180,7 @@ OBS **소스 → + → 브라우저**에서 `로컬 파일`을 끄고 설정합�
 
 ## 개발과 라이선스
 
-Electron + Node.js + Canvas 2D, WinMM MIDI 브리지, C# WASAPI 프로세스 오디오 캡처로 구성합니다. 서버는 `127.0.0.1`에만 바인딩됩니다. 개인 녹음·의존성·임시 자료는 Git에서 제외합니다. 현재 배포 방식은 **소스에서 설치·실행**이며 별도 설치형 EXE는 제공하지 않습니다.
+Electron + Node.js + Canvas 2D, WinMM MIDI 브리지, C# WASAPI 프로세스 오디오 캡처로 구성합니다. 서버는 `127.0.0.1`에만 바인딩됩니다. 개인 녹음·의존성·임시 자료는 Git에서 제외합니다. Windows 설치 EXE와 실행 ZIP은 [Releases](https://github.com/EcchiClone/eclone-piano/releases)에 있습니다. [배포본 빌드 방법](docs/RELEASING.md)도 제공합니다.
 
 ```powershell
 npm test

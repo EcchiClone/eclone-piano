@@ -1,6 +1,6 @@
 {
   "name": "eclone-piano",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "EClone Games MIDI visualization studio with Kontakt recording, 60fps export, OBS scenes and desktop overlay",
@@ -20,7 +20,12 @@
     "docs:images": "node scripts/docs/capture-images.mjs",
     "diagnose:midi": "node scripts/diagnostics/midi-smoke.mjs",
     "diagnose:audio": "node scripts/diagnostics/audio-smoke.mjs",
-    "analyze:wav": "node scripts/diagnostics/analyze-wav.mjs"
+    "analyze:wav": "node scripts/diagnostics/analyze-wav.mjs",
+    "prepare:win": "node scripts/release/prepare.mjs",
+    "dist:win": "npm run prepare:win && electron-builder --win --x64 --publish never",
+    "test:packaged": "node tests/desktop/packaged.mjs",
+    "release:files": "node scripts/release/artifacts.mjs",
+    "test:installer": "node tests/desktop/installer.mjs"
   },
   "dependencies": {
     "ws": "^8.18.3"
@@ -28,6 +33,7 @@
   "devDependencies": {
     "@playwright/test": "^1.64.1",
     "electron": "^39.2.7",
+    "electron-builder": "26.18.0",
     "prettier": "^3.9.10"
   },
   "engines": {
@@ -42,5 +48,6 @@
   "homepage": "https://github.com/EcchiClone/eclone-piano#readme",
   "bugs": {
     "url": "https://github.com/EcchiClone/eclone-piano/issues"
-  }
+  },
+  "productName": "EClone Piano"
 }

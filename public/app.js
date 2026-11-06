@@ -845,6 +845,13 @@ if (!viewer) {
         .map((d) => `<option value="${d.id}">${escape(d.label)} · ${d.width}×${d.height}</option>`)
         .join('');
     });
+  if (window.desktop?.appInfo) {
+    window.desktop.appInfo().then((info) => {
+      $('appVersion').textContent = `v${info.version}`;
+    });
+    $('licensesButton').hidden = false;
+    $('licensesButton').onclick = () => window.desktop.licenses();
+  }
   $('cancelExport').onclick = () => {
     if (exportAbort) exportAbort();
     else $('exportDialog').close();

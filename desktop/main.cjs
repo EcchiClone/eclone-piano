@@ -5,7 +5,11 @@ const { pathToFileURL } = require('node:url');
 let studio,
   overlay,
   backend,
+  paths,
   quitting = false;
+app.setName('EClone Piano');
+if (process.env.ECLONE_USER_DATA_DIR)
+  app.setPath('userData', path.resolve(process.env.ECLONE_USER_DATA_DIR));
 const base = 'http://127.0.0.1:3210';
 function toggleOverlay(displayId) {
   if (overlay && !overlay.isDestroyed()) {
@@ -71,9 +75,17 @@ else {
     }
   });
   app.whenReady().then(async () => {
+    paths = projectPaths(undefined, {
+      resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+      dataDir: app.isPackaged ? path.join(app.getPath('userData'), 'recordings') : undefined,
+    });
     try {
       const mod = await import(pathToFileURL(path.join(__dirname, '../server/index.js')));
-      backend = await mod.startServer({ onOverlay: toggleOverlay });
+      backend = await mod.startServer({
+        onOverlay: toggleOverlay,
+        dataDir: paths.recordings,
+        paths,
+      });
     } catch (e) {
       dialog.showErrorBox(
         'EClone Piano 실행 실패',
@@ -126,7 +138,19 @@ else {
       })),
     );
     ipcMain.handle('overlay', (_, id) => toggleOverlay(id));
-    ipcMain.handle('recordings', () => shell.openPath(projectPaths().recordings));
+    ipcMain.handle('recordings', () => shell.openPath(paths.recordings));
+    ipcMain.handle('appInfo', () => ({
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      recordings: paths.recordings,
+    }));
+    ipcMain.handle('licenses', () =>
+      shell.openPath(
+        app.isPackaged
+          ? path.join(process.resourcesPath, 'licenses')
+          : path.join(__dirname, '../LICENSE'),
+      ),
+    );
     globalShortcut.register('CommandOrControl+Shift+F10', () => toggleOverlay());
     globalShortcut.register('CommandOrControl+Shift+F12', () => {
       if (overlay) {

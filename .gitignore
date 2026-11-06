@@ -6,3 +6,4 @@ native/audio/obj/
 *.log
 *.tmp
 test-results/
+dist/
