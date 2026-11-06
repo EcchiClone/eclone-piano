@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mapMidiEventsToAudio } from '../server/audio-clock.js';
+import { mapMidiEventsToAudio } from '../../server/audio-clock.js';
 
 const wave = { sampleRate: 48000, frames: 28_800_000 };
 const clock = (anchors) => ({ version: 1, sampleRate: 48000, anchors });

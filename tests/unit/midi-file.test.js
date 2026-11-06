@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { encodeMidi } from '../server/midi-file.js';
+import { encodeMidi } from '../../server/midi-file.js';
 
 // Read the SMF independently, checking framing and converting deltas to ticks.
 function parse(bytes) {

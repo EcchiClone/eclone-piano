@@ -1,13 +1,15 @@
+import { runtimePaths, prepareRuntime } from '../../scripts/lib/runtime.mjs';
+import { browserExecutablePath } from '../../scripts/lib/browser.mjs';
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { startServer } from '../server/index.js';
+import { startServer } from '../../server/index.js';
 
 // Mock process discovery and intercept record commands before WebSocket delivery.
 // No Kontakt process, live connection or audio capture is changed by this test.
-const runtime = path.resolve('.runtime');
-await fs.mkdir(runtime, { recursive: true });
+const runtime = runtimePaths.tmp;
+await prepareRuntime();
 const dataDir = await fs.mkdtemp(path.join(runtime, 'audio-source-test-data-'));
 const report = { cases: [], errors: [] };
 const processList = (...pids) => pids.map((pid) => ({ pid, name: 'Kontakt 7' }));
@@ -18,10 +20,7 @@ let mock = { processes: processList(19592) },
 try {
   server = await startServer({ port: 3228, dataDir });
   browser = await chromium.launch({
-    executablePath:
-      process.env.ECLONE_TEST_BROWSER ||
-      process.env.LUMA_TEST_BROWSER ||
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    executablePath: browserExecutablePath(),
     headless: true,
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
@@ -216,7 +215,7 @@ try {
   console.log('Audio source refresh regression: ' + JSON.stringify(report, null, 2));
 } finally {
   await fs.writeFile(
-    path.join(runtime, 'audio-source-refresh-report.json'),
+    path.join(runtimePaths.reports, 'audio-source-refresh-report.json'),
     JSON.stringify(report, null, 2),
   );
   await browser?.close();

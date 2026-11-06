@@ -24,11 +24,11 @@ EClone Games의 EClone Piano 실제 웹 UI를 Headless Chrome으로 캡처했습
 
 ```sh
 npm ci
-node tests/documentation-images.mjs
+npm run docs:images
 ```
 
 Windows에서는 설치된 Chrome을 기본으로 사용합니다. 다른 Chromium 실행 파일은 `ECLONE_DOC_BROWSER` 환경변수로 지정할 수 있습니다. 다른 운영체제에서는 Playwright Chromium을 설치해야 합니다.
 
-스크립트는 3367 포트의 별도 서버와 `.runtime/documentation-data-*` 임시 폴더를 사용하고 종료 시 정리합니다. 운영 서버인 3210 포트에는 접근하지 않습니다. MIDI 및 오디오 네이티브 도우미는 모두 가짜 응답으로 대체하므로 실제 연결이나 녹음이 시작되지 않습니다.
+스크립트는 3367 포트의 별도 서버와 `.runtime/tmp/documentation-data-*` 임시 폴더를 사용하고 종료 시 정리합니다. 운영 서버인 3210 포트에는 접근하지 않습니다. MIDI 및 오디오 네이티브 도우미는 모두 가짜 응답으로 대체하므로 실제 연결이나 녹음이 시작되지 않습니다.
 
 UI 오류, 가로 넘침, 투명 배경 및 건반 알파값을 검사한 뒤 세 PNG를 덮어씁니다. 공개 전에는 이미지를 열어 제품명과 화면 상태를 함께 확인하세요.

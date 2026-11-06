@@ -172,7 +172,7 @@ childProcess.spawn = (command, args) => {
 };
 fs.existsSync = (file) => String(file).endsWith('ProcessAudio.dll') || originalExists(file);
 syncBuiltinESMExports();
-const { startServer } = await import('../server/index.js');
+const { startServer } = await import('../../server/index.js');
 
 async function connect() {
   behavior = {};

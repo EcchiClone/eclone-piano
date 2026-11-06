@@ -10,10 +10,10 @@ import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { encodeMidi } from './midi-file.js';
 import { mapMidiEventsToAudio } from './audio-clock.js';
+import { projectPaths } from '../shared/paths.cjs';
 import { Performance as MidiPerformance } from '../public/engine.js';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_DATA = path.join(ROOT, 'recordings');
+const { root: ROOT, recordings: DEFAULT_DATA, midiScript, audioHelper: helper } = projectPaths();
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -245,14 +245,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
     }
     bridge = spawn(
       'powershell.exe',
-      [
-        '-NoLogo',
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        path.join(ROOT, 'native', 'midi-bridge.ps1'),
-      ],
+      ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', midiScript],
       { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
     );
     createInterface({ input: bridge.stdout }).on('line', (line) => {
@@ -526,14 +519,7 @@ export async function startServer({ port = 3210, onOverlay, dataDir = DEFAULT_DA
       deletingSessions.delete(id);
     }
   }
-  const helper = path.join(
-    ROOT,
-    'native-audio',
-    'bin',
-    'Release',
-    'net9.0-windows',
-    'ProcessAudio.dll',
-  );
+
   function audioSourceChanged(detail = '') {
     return Object.assign(
       new Error(

@@ -1,9 +1,9 @@
+import { runtimePaths, prepareRuntime } from '../../scripts/lib/runtime.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { assessEnvironment, collectDiagnostics, formatDiagnostics } from '../scripts/doctor.mjs';
+import { assessEnvironment, collectDiagnostics, formatDiagnostics } from '../../scripts/doctor.mjs';
 
 function installed(overrides = {}) {
   return {
@@ -106,9 +106,8 @@ test('an old Windows build or another OS retains preview but does not promise na
 });
 
 test('new checkout diagnostics use portable paths and only read-only version commands', async () => {
-  const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const runtime = path.join(project, '.runtime');
-  await fs.mkdir(runtime, { recursive: true });
+  const runtime = runtimePaths.tmp;
+  await prepareRuntime();
   const root = await fs.mkdtemp(path.join(runtime, 'doctor spaces '));
   const commands = [];
   try {

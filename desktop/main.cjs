@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, globalShortcut, screen, shell, dialog } = require('electron');
 const path = require('node:path');
+const { projectPaths } = require('../shared/paths.cjs');
 const { pathToFileURL } = require('node:url');
 let studio,
   overlay,
@@ -125,7 +126,7 @@ else {
       })),
     );
     ipcMain.handle('overlay', (_, id) => toggleOverlay(id));
-    ipcMain.handle('recordings', () => shell.openPath(path.join(__dirname, '../recordings')));
+    ipcMain.handle('recordings', () => shell.openPath(projectPaths().recordings));
     globalShortcut.register('CommandOrControl+Shift+F10', () => toggleOverlay());
     globalShortcut.register('CommandOrControl+Shift+F12', () => {
       if (overlay) {

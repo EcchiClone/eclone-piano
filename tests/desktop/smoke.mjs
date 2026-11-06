@@ -1,11 +1,11 @@
+import { runtimePaths, prepareRuntime } from '../../scripts/lib/runtime.mjs';
 import { _electron as electron } from '@playwright/test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-await fs.mkdir('.runtime', { recursive: true });
+await prepareRuntime();
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: ['.'], cwd: process.cwd(), env, timeout: 30000 });
@@ -15,7 +15,7 @@ try {
   assert.equal(await page.title(), 'EClone Piano — 연주를 빛으로');
   const displays = await page.evaluate(() => window.desktop.displays());
   assert.ok(displays.length > 0);
-  await page.screenshot({ path: '.runtime/desktop-studio.png' });
+  await page.screenshot({ path: path.join(runtimePaths.screenshots, 'desktop-studio.png') });
   await page.evaluate((id) => window.desktop.overlay(id), displays[0].id);
   const overlay = await app.waitForEvent('window', {
     predicate: (p) => p !== page,

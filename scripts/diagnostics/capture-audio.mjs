@@ -1,3 +1,5 @@
+import { projectPaths } from '../../shared/paths.cjs';
+import { runtimePaths, prepareRuntime } from '../lib/runtime.mjs';
 // Bounded, explicit diagnostic capture; never runs as part of the test suite.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -8,19 +10,11 @@ if (!Number.isInteger(pid) || pid <= 0) throw new Error('Provide the explicit Ko
 const state = await fetch('http://127.0.0.1:3210/api/state').then((r) => r.json());
 if (state.recording || state.starting || state.stopping)
   throw new Error('A user recording is active; diagnostic capture cancelled.');
-await fs.mkdir('.runtime', { recursive: true });
-const output = path.resolve('.runtime', `packet-diagnostic-${Date.now()}.wav`);
+await prepareRuntime();
+const output = path.join(runtimePaths.tmp, `packet-diagnostic-${Date.now()}.wav`);
 const child = spawn(
   'dotnet',
-  [
-    path.resolve('native-audio/bin/Release/net9.0-windows/ProcessAudio.dll'),
-    '--pid',
-    String(pid),
-    '--output',
-    output,
-    '--seconds',
-    '6',
-  ],
+  [projectPaths().audioHelper, '--pid', String(pid), '--output', output, '--seconds', '6'],
   { windowsHide: true },
 );
 let stdout = '',

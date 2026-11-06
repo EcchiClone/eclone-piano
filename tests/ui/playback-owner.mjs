@@ -1,34 +1,24 @@
+import { runtimePaths, prepareRuntime } from '../../scripts/lib/runtime.mjs';
+import { pcm16Stereo } from '../helpers/audio.mjs';
+import { browserExecutablePath } from '../../scripts/lib/browser.mjs';
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { startServer } from '../server/index.js';
+import { startServer } from '../../server/index.js';
 
-const runtime = path.resolve('.runtime');
-await fs.mkdir(runtime, { recursive: true });
+const runtime = runtimePaths.tmp;
+await prepareRuntime();
 const dataDir = await fs.mkdtemp(path.join(runtime, 'playback-owner-data-'));
 const id = randomUUID(),
   duration = 45,
   rate = 44100;
-const wave = Buffer.alloc(44 + duration * rate * 4);
-wave.write('RIFF');
-wave.writeUInt32LE(wave.length - 8, 4);
-wave.write('WAVEfmt ', 8);
-wave.writeUInt32LE(16, 16);
-wave.writeUInt16LE(1, 20);
-wave.writeUInt16LE(2, 22);
-wave.writeUInt32LE(rate, 24);
-wave.writeUInt32LE(rate * 4, 28);
-wave.writeUInt16LE(4, 32);
-wave.writeUInt16LE(16, 34);
-wave.write('data', 36);
-wave.writeUInt32LE(wave.length - 44, 40);
-for (let frame = 0; frame < duration * rate; frame++) {
-  const sample = Math.round(Math.sin((frame * 2 * Math.PI * 440) / rate) * 1000);
-  wave.writeInt16LE(sample, 44 + frame * 4);
-  wave.writeInt16LE(sample, 46 + frame * 4);
-}
+const wave = pcm16Stereo({
+  duration,
+  sampleRate: rate,
+  sample: (t) => Math.sin(2 * Math.PI * 440 * t) * (1000 / 32767),
+});
 
 const report = { checks: [], errors: [] };
 const originalReadFile = fs.readFile;
@@ -117,7 +107,14 @@ const waitSilent = (page) =>
 async function waitState(predicate) {
   const deadline = Date.now() + 5000;
   while (!predicate(server.state())) {
-    if (Date.now() > deadline) throw new Error('Timed out waiting for ownership state');
+    if (Date.now() > deadline)
+      throw new Error(
+        'Timed out waiting for ownership state: ' +
+          JSON.stringify({
+            transport: server.state().transport,
+            owner: server.state().studioAudioOwnerId,
+          }),
+      );
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
@@ -141,12 +138,17 @@ try {
   server = await startServer({ port: 0, dataDir });
   const url = `http://127.0.0.1:${server.port}`;
   browser = await chromium.launch({
-    executablePath:
-      process.env.ECLONE_TEST_BROWSER ||
-      process.env.LUMA_TEST_BROWSER ||
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    executablePath: browserExecutablePath(),
     headless: true,
-    args: ['--autoplay-policy=no-user-gesture-required', '--mute-audio'],
+    // Reconnection is tested in background pages. Keep their timers running as
+    // they do in Electron; machine load must not turn this into a timer-throttling test.
+    args: [
+      '--autoplay-policy=no-user-gesture-required',
+      '--mute-audio',
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+    ],
   });
   // Separate contexts cannot share BroadcastChannel/localStorage, like Electron and Chrome.
   const contexts = await Promise.all([browser.newContext(), browser.newContext()]);
@@ -309,8 +311,16 @@ try {
   fs.readFile = originalReadFile;
   releaseRead?.();
   await fs.writeFile(
-    path.join(runtime, 'playback-owner-report.json'),
-    JSON.stringify(report, null, 2),
+    path.join(runtimePaths.reports, 'playback-owner-report.json'),
+    JSON.stringify(
+      {
+        ...report,
+        lastTransport: server?.state().transport,
+        lastOwner: server?.state().studioAudioOwnerId,
+      },
+      null,
+      2,
+    ),
   );
   await browser?.close();
   await server?.close();

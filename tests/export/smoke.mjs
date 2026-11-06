@@ -1,45 +1,33 @@
+import { runtimePaths, prepareRuntime } from '../../scripts/lib/runtime.mjs';
+import { pcm16Stereo } from '../helpers/audio.mjs';
+import { browserExecutablePath } from '../../scripts/lib/browser.mjs';
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { startServer } from '../server/index.js';
+import { startServer } from '../../server/index.js';
 
 // This test uses its own generated tone + MIDI fixture and its own local server.
 // It never records Kontakt, opens a MIDI input, or uses the user's browser session.
 const exec = promisify(execFile);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const id = 'export-smoke-' + randomUUID();
-await fs.mkdir(path.join(root, '.runtime'), { recursive: true });
-const recordingRoot = await fs.mkdtemp(path.join(root, '.runtime', 'export-data-'));
+await prepareRuntime();
+const recordingRoot = await fs.mkdtemp(path.join(runtimePaths.tmp, 'export-data-'));
 const prefix = path.join(recordingRoot, id);
 const duration = 2.4;
 const onset = 0.35;
 const rate = 48000;
-const frames = Math.round(duration * rate);
-const wav = Buffer.alloc(44 + frames * 4);
-wav.write('RIFF', 0);
-wav.writeUInt32LE(wav.length - 8, 4);
-wav.write('WAVEfmt ', 8);
-wav.writeUInt32LE(16, 16);
-wav.writeUInt16LE(1, 20);
-wav.writeUInt16LE(2, 22);
-wav.writeUInt32LE(rate, 24);
-wav.writeUInt32LE(rate * 4, 28);
-wav.writeUInt16LE(4, 32);
-wav.writeUInt16LE(16, 34);
-wav.write('data', 36);
-wav.writeUInt32LE(frames * 4, 40);
-for (let i = 0; i < frames; i++) {
-  const t = i / rate;
-  const envelope = t < onset || t > 1.85 ? 0 : Math.min(1, (t - onset) / 0.01, (1.85 - t) / 0.02);
-  const sample = Math.round(Math.sin(2 * Math.PI * 440 * t) * envelope * 0.25 * 32767);
-  wav.writeInt16LE(sample, 44 + i * 4);
-  wav.writeInt16LE(sample, 46 + i * 4);
-}
+const wav = pcm16Stereo({
+  duration,
+  sampleRate: rate,
+  sample: (t) => {
+    const envelope = t < onset || t > 1.85 ? 0 : Math.min(1, (t - onset) / 0.01, (1.85 - t) / 0.02);
+    return Math.sin(2 * Math.PI * 440 * t) * envelope * 0.25;
+  },
+});
 const session = {
   id,
   version: 1,
@@ -57,7 +45,7 @@ let server, browser;
 const report = { id, inputDuration: duration, errors: [] };
 try {
   await fs.mkdir(recordingRoot, { recursive: true });
-  await fs.mkdir(path.join(root, '.runtime'), { recursive: true });
+  await prepareRuntime();
   await fs.writeFile(prefix + '.wav', wav);
   await fs.writeFile(prefix + '.session.json', JSON.stringify(session));
   const silentId = id + '-silent';
@@ -177,10 +165,7 @@ try {
   report.h264Validation =
     'Incorrect declared count and 143/144 decoded frames rejected; partial files cleaned';
   browser = await chromium.launch({
-    executablePath:
-      process.env.ECLONE_TEST_BROWSER ||
-      process.env.LUMA_TEST_BROWSER ||
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    executablePath: browserExecutablePath(),
     headless: true,
     args: ['--autoplay-policy=no-user-gesture-required'],
   });
@@ -403,7 +388,7 @@ try {
   console.log(JSON.stringify(report, null, 2));
 } finally {
   await fs.writeFile(
-    path.join(root, '.runtime', 'export-report.json'),
+    path.join(runtimePaths.reports, 'export-report.json'),
     JSON.stringify(report, null, 2),
   );
   await browser?.close();
@@ -413,7 +398,7 @@ try {
     if (filename.startsWith(id + '.') || filename.startsWith(id + '-'))
       await fs.unlink(path.join(recordingRoot, filename)).catch(() => {});
   }
-  if (!recordingRoot.startsWith(path.join(root, '.runtime') + path.sep + 'export-data-'))
+  if (!recordingRoot.startsWith(runtimePaths.tmp + path.sep + 'export-data-'))
     throw new Error('Unsafe export test path');
   await fs.rm(recordingRoot, { recursive: true, force: true });
 }

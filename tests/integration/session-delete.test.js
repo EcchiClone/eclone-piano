@@ -1,3 +1,4 @@
+import { runtimePaths, prepareRuntime } from '../../scripts/lib/runtime.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
@@ -120,7 +121,7 @@ childProcess.spawn = (command, args) => {
 };
 fsSync.existsSync = (file) => String(file).endsWith('ProcessAudio.dll') || originalExists(file);
 syncBuiltinESMExports();
-const { startServer } = await import('../server/index.js');
+const { startServer } = await import('../../server/index.js');
 
 async function until(predicate, timeout = 2500) {
   const deadline = Date.now() + timeout;
@@ -135,8 +136,8 @@ async function until(predicate, timeout = 2500) {
 async function setup() {
   audioBehavior = {};
   recorder = null;
-  const runtimeRoot = path.resolve('.runtime');
-  await fs.mkdir(runtimeRoot, { recursive: true });
+  const runtimeRoot = runtimePaths.tmp;
+  await prepareRuntime();
   const dataDir = await fs.mkdtemp(path.join(runtimeRoot, 'session-delete-tests-'));
   const app = await startServer({ port: 0, dataDir });
   const { port } = app;

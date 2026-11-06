@@ -8,7 +8,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { WebSocket } from 'ws';
-import { Performance as MidiPerformance } from '../public/engine.js';
+import { Performance as MidiPerformance } from '../../public/engine.js';
 
 const originalSpawn = childProcess.spawn;
 const originalPerformance = globalThis.performance;
@@ -86,7 +86,7 @@ childProcess.spawn = (command) => {
   return child;
 };
 syncBuiltinESMExports();
-const { startServer } = await import('../server/index.js');
+const { startServer } = await import('../../server/index.js');
 
 async function clientFor(port, viewer = false) {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/${viewer ? '?viewer=1' : ''}`, {

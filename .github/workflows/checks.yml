@@ -26,4 +26,4 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build:audio
-      - run: dotnet native-audio/bin/Release/net9.0-windows/ProcessAudio.dll --self-test
+      - run: dotnet native/audio/bin/Release/net9.0-windows/ProcessAudio.dll --self-test

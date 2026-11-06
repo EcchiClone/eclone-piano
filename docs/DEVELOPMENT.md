@@ -4,18 +4,26 @@
 
 ## 구조
 
-| 경로            | 역할                                                                 |
-| --------------- | -------------------------------------------------------------------- |
-| `public/`       | 스튜디오 UI, 시간 기반 Canvas 렌더러, WebCodecs 오프라인 영상 인코딩 |
-| `server/`       | HTTP/WebSocket, MIDI 상태, 녹음·재생, 세션 파일, FFmpeg 내보내기     |
-| `desktop/`      | Electron 스튜디오, 모니터 선택과 투명 클릭 통과 창                   |
-| `native/`       | Windows PowerShell에서 실행하는 C# WinMM MIDI 브리지                 |
-| `native-audio/` | .NET 9 / x64 WASAPI 프로세스 오디오 캡처                             |
-| `scripts/`      | 기능별 환경 진단                                                     |
-| `tests/`        | 단위·통합 검사, 격리 브라우저·영상·데스크톱 검사, 문서 이미지 생성   |
-| `docs/images/`  | README에 사용하는 실제 앱의 데모 스크린샷                            |
+| 경로                   | 역할                                                           |
+| ---------------------- | -------------------------------------------------------------- |
+| `public/`              | 스튜디오 UI, Canvas 렌더러, WebCodecs 영상 인코딩              |
+| `server/`              | 로컬 HTTP/WebSocket 서버, MIDI 상태, 녹음·재생·파일 관리       |
+| `desktop/`             | Electron 스튜디오와 클릭 통과 오버레이                         |
+| `shared/paths.cjs`     | 서버·데스크톱·도구에서 함께 쓰는 프로젝트/네이티브 실행 경로   |
+| `native/midi/`         | Windows PowerShell에서 실행하는 C# WinMM MIDI 브리지           |
+| `native/audio/`        | .NET 9 x64 WASAPI 오디오 도우미. bin/obj는 빌드 산출물         |
+| `scripts/doctor.mjs`   | 설치 환경과 기능별 준비 상태 진단                              |
+| `scripts/diagnostics/` | 실제 장치 확인·짧은 진단 녹음·기존 WAV 분석                    |
+| `scripts/docs/`        | 합성 데모를 사용한 README 스크린샷 생성                        |
+| `scripts/lib/`         | 브라우저 선택과 임시 산출물 경로의 공통 코드                   |
+| `tests/`               | unit / integration / ui / export / desktop 검사와 공통 fixture |
+| `docs/`                | 설치·개발·검증 가이드, 공개용 이미지                           |
+| `recordings/`          | 사용자 연주와 설정. Git 추적 제외                              |
+| `.runtime/`            | 개발 산출물과 과거 진단 자료. Git 추적 제외                    |
 
-네이티브 상세: [MIDI 프로토콜](../native/README.md), [오디오 프로토콜](../native-audio/README.md).
+[검사 구성과 실행 명령](../tests/README.md) · [수동 진단 도구](../scripts/diagnostics/README.md)
+
+네이티브 상세: [MIDI 프로토콜](../native/midi/README.md), [오디오 프로토콜](../native/audio/README.md).
 
 ## 로컬 검증
 
@@ -26,7 +34,7 @@ npm test
 npm run check
 npm run test:ui
 npm run test:export
-dotnet native-audio/bin/Release/net9.0-windows/ProcessAudio.dll --self-test
+dotnet native/audio/bin/Release/net9.0-windows/ProcessAudio.dll --self-test
 ```
 
 브라우저 검사는 기본적으로 `C:\Program Files\Google\Chrome\Application\chrome.exe`를 사용합니다. Chrome 경로가 다르면 환경 변수를 지정하세요.
@@ -43,11 +51,29 @@ npm run test:ui
 다음 검사는 실제 장치를 열거하거나 Kontakt를 잠깐 녹음하므로 개발자가 명시적으로 실행합니다. CI에서는 실행하지 않습니다.
 
 ```powershell
-node native/test-bridge.mjs
-node native-audio/smoke-test.mjs
+npm run diagnose:midi
+npm run diagnose:audio -- <Kontakt PID>
 ```
 
 GitHub Actions는 Windows에서 의존성 설치, 문법·단위·서버 검사, 오디오 도우미 빌드와 합성 오디오 자체검사를 실행합니다. 실제 연주 품질을 CI 통과만으로 보증하지 않습니다.
+
+## 파일을 추가할 때
+
+- 런타임 코드는 public / server / desktop / native 중 담당 계층에 둡니다. 네이티브 도우미 경로는 shared/paths.cjs에서 가져옵니다.
+- 자동 검사는 tests 하위의 해당 종류에, 실제 장치를 건드리는 수동 도구는 scripts/diagnostics에 둡니다.
+- 공개 README 이미지는 docs/images에 저장하고 `npm run docs:images`로 다시 생성합니다. 테스트 스크린샷과 섞지 않습니다.
+- `npm run check`는 모든 JavaScript 소스·도구·검사를 찾아 문법을 확인합니다. 파일을 추가할 때 검사 대상 목록을 따로 고칠 필요가 없습니다.
+
+### 로컬 산출물
+
+| 위치                    | 내용과 수명                                                |
+| ----------------------- | ---------------------------------------------------------- |
+| `.runtime/reports/`     | 최신 검사 JSON 보고서. 같은 검사를 실행하면 갱신           |
+| `.runtime/screenshots/` | 최신 테스트 스크린샷                                       |
+| `.runtime/tmp/`         | 테스트별 임시 데이터. 자동 검사는 종료 시 자기 폴더만 정리 |
+| `.runtime/archive/`     | 보관한 과거 진단 자료. 자동 검사에서 읽거나 지우지 않음    |
+
+기존 평면 구조의 진단 자료는 정리 시점의 archive 하위 폴더에 원래 파일명으로 보관했습니다. MANIFEST.json에 파일 크기와 SHA-256을 기록했습니다. 과거 일회성 스크립트는 당시 경로를 담은 기록이므로 재실행에는 현재 scripts의 도구를 사용하세요. 이 보관 폴더는 해당 PC의 개발 자료이며 Git에 포함하지 않습니다.
 
 ## 설계에서 지켜야 할 점
 

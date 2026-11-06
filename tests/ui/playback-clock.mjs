@@ -1,37 +1,24 @@
+import { runtimePaths, prepareRuntime } from '../../scripts/lib/runtime.mjs';
+import { pcm16Stereo } from '../helpers/audio.mjs';
+import { browserExecutablePath } from '../../scripts/lib/browser.mjs';
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { startServer } from '../server/index.js';
+import { startServer } from '../../server/index.js';
 
-const runtime = path.resolve('.runtime');
-await fs.mkdir(runtime, { recursive: true });
+const runtime = runtimePaths.tmp;
+await prepareRuntime();
 const dataDir = await fs.mkdtemp(path.join(runtime, 'playback-clock-data-'));
 const id = randomUUID(),
   duration = 3,
   rate = 48000;
-const wave = Buffer.alloc(44 + duration * rate * 4);
-wave.write('RIFF', 0);
-wave.writeUInt32LE(wave.length - 8, 4);
-wave.write('WAVEfmt ', 8);
-wave.writeUInt32LE(16, 16);
-wave.writeUInt16LE(1, 20);
-wave.writeUInt16LE(2, 22);
-wave.writeUInt32LE(rate, 24);
-wave.writeUInt32LE(rate * 4, 28);
-wave.writeUInt16LE(4, 32);
-wave.writeUInt16LE(16, 34);
-wave.write('data', 36);
-wave.writeUInt32LE(wave.length - 44, 40);
-for (let frame = 0; frame < rate * duration; frame++) {
-  // Keep an audible tone in the last 800ms: truncating the tail loses real sound.
-  const t = frame / rate,
-    amplitude = t > 2.2 ? 0.2 : 0.03;
-  const sample = Math.round(Math.sin((frame * 2 * Math.PI * 440) / rate) * amplitude * 32767);
-  wave.writeInt16LE(sample, 44 + frame * 4);
-  wave.writeInt16LE(sample, 46 + frame * 4);
-}
+const wave = pcm16Stereo({
+  duration,
+  sampleRate: rate,
+  sample: (t) => Math.sin(2 * Math.PI * 440 * t) * (t > 2.2 ? 0.2 : 0.03),
+});
 const report = { errors: [] };
 let server, browser;
 try {
@@ -53,10 +40,7 @@ try {
   );
   server = await startServer({ port: 3227, dataDir });
   browser = await chromium.launch({
-    executablePath:
-      process.env.ECLONE_TEST_BROWSER ||
-      process.env.LUMA_TEST_BROWSER ||
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    executablePath: browserExecutablePath(),
     headless: true,
     args: ['--autoplay-policy=no-user-gesture-required', '--mute-audio'],
   });
@@ -220,7 +204,7 @@ try {
   console.log('Playback clock regression: ' + JSON.stringify(report, null, 2));
 } finally {
   await fs.writeFile(
-    path.join(runtime, 'playback-clock-report.json'),
+    path.join(runtimePaths.reports, 'playback-clock-report.json'),
     JSON.stringify(report, null, 2),
   );
   await browser?.close();

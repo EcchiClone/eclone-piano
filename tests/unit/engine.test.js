@@ -1,6 +1,7 @@
+import { browserExecutablePath } from '../../scripts/lib/browser.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Performance, PianoRenderer, pianoLayout } from '../public/engine.js';
+import { Performance, PianoRenderer, pianoLayout } from '../../public/engine.js';
 
 test('note on, zero-velocity note off, and physical vs sounding state', () => {
   const p = new Performance();
@@ -212,21 +213,9 @@ test(
   { timeout: 30000 },
   async () => {
     const { chromium } = await import('@playwright/test');
-    const { readFile, access } = await import('node:fs/promises');
-    const source = await readFile(new URL('../public/engine.js', import.meta.url), 'utf8');
-    let executablePath = process.env.ECLONE_TEST_BROWSER || process.env.LUMA_TEST_BROWSER;
-    if (!executablePath && process.platform === 'win32') {
-      for (const candidate of [
-        'C:/Program Files/Google/Chrome/Application/chrome.exe',
-        'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-      ]) {
-        try {
-          await access(candidate);
-          executablePath = candidate;
-          break;
-        } catch {}
-      }
-    }
+    const { readFile } = await import('node:fs/promises');
+    const source = await readFile(new URL('../../public/engine.js', import.meta.url), 'utf8');
+    const executablePath = browserExecutablePath();
     const browser = await chromium.launch({ executablePath, headless: true });
     try {
       const page = await browser.newPage();

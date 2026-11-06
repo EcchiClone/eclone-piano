@@ -4,7 +4,8 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 
-const PROJECT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+import { projectPaths } from '../shared/paths.cjs';
+const PROJECT = projectPaths().root;
 
 function runCommand(command, args) {
   return new Promise((resolve) => {
@@ -93,7 +94,7 @@ export function assessEnvironment(evidence) {
     'Windows PowerShell / MIDI 브리지',
     windows && evidence.powershell.ok && evidence.midiBridge,
     evidence.powershell.ok ? evidence.powershell.stdout.trim() : '사용할 수 없음',
-    'Windows PowerShell과 native/midi-bridge.ps1, native/MidiBridge.cs 파일을 확인하세요.',
+    'Windows PowerShell과 native/midi/midi-bridge.ps1, native/midi/MidiBridge.cs 파일을 확인하세요.',
   );
   const sdks = evidence.dotnetSdks.stdout.split(/\r?\n/).filter((line) => /^\d+\./.test(line));
   const sdk = evidence.dotnetSdks.ok && sdks.some((line) => Number(line.split('.')[0]) >= 9);
@@ -129,7 +130,7 @@ export function assessEnvironment(evidence) {
     '빌드된 오디오 도우미',
     evidence.audioHelper,
     evidence.audioHelper
-      ? 'native-audio/bin/Release/net9.0-windows/ProcessAudio.dll'
+      ? 'native/audio/bin/Release/net9.0-windows/ProcessAudio.dll'
       : 'DLL 또는 runtimeconfig.json 없음',
     'npm run build:audio 또는 npm run setup을 실행하세요.',
   );
@@ -194,14 +195,8 @@ export async function collectDiagnostics({
   osRelease = os.release(),
   run = runCommand,
 } = {}) {
-  const helper = path.join(
-    root,
-    'native-audio',
-    'bin',
-    'Release',
-    'net9.0-windows',
-    'ProcessAudio',
-  );
+  const paths = projectPaths(root);
+  const helper = paths.audioHelper.slice(0, -4);
   const [
     ws,
     electronPackage,
@@ -234,8 +229,8 @@ export async function collectDiagnostics({
       : { ok: false, stdout: '' },
     exists(helper + '.dll'),
     exists(helper + '.runtimeconfig.json'),
-    exists(path.join(root, 'native', 'midi-bridge.ps1')),
-    exists(path.join(root, 'native', 'MidiBridge.cs')),
+    exists(paths.midiScript),
+    exists(paths.midiSource),
   ]);
   let electronPath = '';
   try {

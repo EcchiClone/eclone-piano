@@ -168,7 +168,7 @@ OBS **소스 → + → 브라우저**에서 `로컬 파일`을 끄고 설정합�
 | 영상 생성이 느리거나 실패함           | FFmpeg·FFprobe와 H.264 인코더 지원을 확인합니다. 데스크톱 앱에서 시도하고, 렌더링이 끝날 때까지 앱을 유지합니다. |
 | 실행 시 포트 사용 중 오류             | `3210`을 쓰는 다른 EClone Piano 앱/서버를 종료합니다.                                                            |
 
-[자세한 설치·연결](docs/SETUP.md) · [개발 및 테스트](docs/DEVELOPMENT.md) · [검증 범위](docs/VALIDATION.md)
+[자세한 설치·연결](docs/SETUP.md) · [프로젝트 구조·개발 및 테스트](docs/DEVELOPMENT.md) · [검증 범위](docs/VALIDATION.md)
 
 ## 개발과 라이선스
 

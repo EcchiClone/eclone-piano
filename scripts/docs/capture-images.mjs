@@ -1,3 +1,5 @@
+import { runtimePaths, prepareRuntime } from '../lib/runtime.mjs';
+import { browserExecutablePath } from '../lib/browser.mjs';
 // Reproducible documentation images. This never opens a real MIDI/audio device
 // and never reads recordings/: the native helpers below are synthetic fixtures.
 import assert from 'node:assert/strict';
@@ -11,10 +13,10 @@ import { PassThrough, Writable } from 'node:stream';
 import { syncBuiltinESMExports } from 'node:module';
 import { chromium } from '@playwright/test';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const runtime = path.join(root, '.runtime');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const runtime = runtimePaths.tmp;
 const output = path.join(root, 'docs', 'images');
-await fs.mkdir(runtime, { recursive: true });
+await prepareRuntime();
 await fs.mkdir(output, { recursive: true });
 const dataDir = await fs.mkdtemp(path.join(runtime, 'documentation-data-'));
 const originalSpawn = childProcess.spawn;
@@ -83,7 +85,7 @@ syncBuiltinESMExports();
 let app, browser;
 const errors = [];
 try {
-  const { startServer } = await import('../server/index.js');
+  const { startServer } = await import('../../server/index.js');
   const port = 3367;
   app = await startServer({ port, dataDir });
   const base = `http://127.0.0.1:${port}`;
@@ -102,11 +104,7 @@ try {
     );
   browser = await chromium.launch({
     headless: true,
-    executablePath:
-      process.env.ECLONE_DOC_BROWSER ||
-      (process.platform === 'win32'
-        ? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
-        : undefined),
+    executablePath: browserExecutablePath(process.env.ECLONE_DOC_BROWSER),
   });
   const studio = await browser.newPage({
     viewport: { width: 1440, height: 1100 },

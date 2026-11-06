@@ -1,3 +1,6 @@
+import { runtimePaths, prepareRuntime } from '../../scripts/lib/runtime.mjs';
+import { join } from 'node:path';
+import { browserExecutablePath } from '../../scripts/lib/browser.mjs';
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -7,11 +10,8 @@ if (process.env.ECLONE_UI_ISOLATED !== '1' || !process.env.ECLONE_TEST_URL)
     'Run npm run test:ui so fixture imports/deletion use an isolated data directory.',
   );
 const base = process.env.ECLONE_TEST_URL;
-const executablePath =
-  process.env.ECLONE_TEST_BROWSER ||
-  process.env.LUMA_TEST_BROWSER ||
-  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-await fs.mkdir('.runtime', { recursive: true });
+const executablePath = browserExecutablePath();
+await prepareRuntime();
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({
   viewport: { width: 1920, height: 1080 },
@@ -23,7 +23,7 @@ const report = { screenshots: [], layouts: [] };
 let originalSettings;
 
 async function capture(name, options = {}) {
-  const path = `.runtime/${name}.png`;
+  const path = join(runtimePaths.screenshots, `${name}.png`);
   await page.screenshot({ path, ...options });
   report.screenshots.push(path);
 }
@@ -163,8 +163,11 @@ try {
     255,
     'Keyboard must remain visible over a transparent background.',
   );
-  await stage.screenshot({ path: '.runtime/stage-transparent-1920.png', omitBackground: true });
-  report.screenshots.push('.runtime/stage-transparent-1920.png');
+  await stage.screenshot({
+    path: join(runtimePaths.screenshots, 'stage-transparent-1920.png'),
+    omitBackground: true,
+  });
+  report.screenshots.push(join(runtimePaths.screenshots, 'stage-transparent-1920.png'));
   const desktopOverlay = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   await desktopOverlay.goto(base + '/stage?transparent=1&overlay=1');
   await desktopOverlay.waitForFunction(() => window.ecloneDiagnostics()?.session === 'demo');
@@ -194,7 +197,7 @@ try {
   });
   console.log('Overlay alpha diagnostic:', JSON.stringify(overlayPixels));
   await desktopOverlay.screenshot({
-    path: '.runtime/overlay-alpha-diagnostic.png',
+    path: join(runtimePaths.screenshots, 'overlay-alpha-diagnostic.png'),
     omitBackground: true,
   });
   assert.ok(
@@ -332,6 +335,6 @@ try {
       }, originalSettings)
       .catch(() => {});
   }
-  await fs.writeFile('.runtime/ui-report.json', JSON.stringify(report, null, 2));
+  await fs.writeFile(join(runtimePaths.reports, 'ui-report.json'), JSON.stringify(report, null, 2));
   await browser.close();
 }

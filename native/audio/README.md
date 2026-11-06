@@ -7,9 +7,9 @@ This helper captures **only the selected process and its child processes**, usin
 Requires the .NET 9 SDK to build and .NET 9 runtime to run. Build from the repository root:
 
 ```powershell
-dotnet build native-audio/ProcessAudio.csproj -c Release
-dotnet native-audio/bin/Release/net9.0-windows/ProcessAudio.dll --probe
-dotnet native-audio/bin/Release/net9.0-windows/ProcessAudio.dll --pid 1234 --output C:\recordings\take-001.wav
+dotnet build native/audio/ProcessAudio.csproj -c Release
+dotnet native/audio/bin/Release/net9.0-windows/ProcessAudio.dll --probe
+dotnet native/audio/bin/Release/net9.0-windows/ProcessAudio.dll --pid 1234 --output C:\recordings\take-001.wav
 ```
 
 The PID above is an example. `--probe` / `--list` returns current Kontakt process IDs. Send `stop` followed by a newline to stdin to finish. EOF and Ctrl+C also stop and finalize the file. Keep a spawned process's stdin pipe open for the entire recording. Optional `--seconds 5` stops after five seconds; it does not override stdin closure. Existing output files are never overwritten.
@@ -20,7 +20,7 @@ The first packet uses its QPC timestamp to establish the session offset. Subsequ
 
 `clockMap` contains version 1, sampleRate, and at most 4096 monotonically increasing `{wallTime, frame}` anchors. They relate QPC seconds since recording start to the corresponding PCM frame offset. Anchors initially sample every 0.5 seconds, thin adaptively for long takes, and retain the first/latest valid points. The server uses piecewise-linear interpolation to save MIDI `t` in PCM seconds; each event keeps its original capture-clock timestamp in `wallTime`, and the MIDI bytes remain unchanged. `eventTimebase: "audio-pcm"` and `midiClockMapping` identify this conversion in a saved session. Original WAV samples are never resampled or modified. Missing/invalid clock maps leave MIDI timestamps unchanged. Session duration still includes the final wall-duration silence padding. When a device counter is unavailable, missing audio packets cannot be inferred reliably; `discontinuities` remains the OS-reported loss indicator.
 
-Run `dotnet native-audio/bin/Release/net9.0-windows/ProcessAudio.dll --self-test` for WAV and synthetic clock-drift regression checks. `node native-audio/analyze-wav.mjs <take.wav> [...]` reads existing PCM16 stereo files and reports peaks, clipped samples, zero gaps and waveform jumps without modifying them. A low peak with short all-zero holes indicates a capture/timing problem rather than level clipping; a limiter cannot reconstruct those missing intervals.
+Run `dotnet native/audio/bin/Release/net9.0-windows/ProcessAudio.dll --self-test` for WAV and synthetic clock-drift regression checks. `node scripts/diagnostics/analyze-wav.mjs <take.wav> [...]` reads existing PCM16 stereo files and reports peaks, clipped samples, zero gaps and waveform jumps without modifying them. A low peak with short all-zero holes indicates a capture/timing problem rather than level clipping; a limiter cannot reconstruct those missing intervals.
 
 ## NDJSON protocol (stdout)
 
@@ -42,8 +42,8 @@ An updated Windows 10 version 2004 (build 19041) or newer is required. Microsoft
 ## Validation
 
 ```powershell
-dotnet native-audio/bin/Release/net9.0-windows/ProcessAudio.dll --self-test
-node native-audio/smoke-test.mjs
+dotnet native/audio/bin/Release/net9.0-windows/ProcessAudio.dll --self-test
+node scripts/diagnostics/audio-smoke.mjs
 ```
 
 The self-test checks WAV duration, header lengths, sample placement, and silent padding. The live smoke test requires running Kontakt and checks actual process-loopback activation, a temporary one-second recording, and the final WAV header. An idle Kontakt naturally produces a silent take; this alone does not verify audible piano signal or long-session synchronization.
