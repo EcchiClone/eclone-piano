@@ -86,6 +86,12 @@ try {
   await page.waitForFunction(() => window.ecloneDiagnostics().mode === 'replay');
   await page.locator('[data-theme="amber"]').click();
   await page.waitForFunction(() => window.ecloneDiagnostics().settings.theme === 'amber');
+  await page.locator('#saveScene').click();
+  await page.locator('#sceneName').fill('Packaged scene');
+  await page.locator('#confirmSceneSave').click();
+  await page.waitForFunction(
+    () => document.getElementById('sceneSelect').value === 'Packaged scene',
+  );
   await page.locator(`[data-export="${id}"]`).click();
   await page.waitForFunction(
     () => document.getElementById('exportStatus').textContent.includes('MP4'),
@@ -124,6 +130,19 @@ try {
   const saved = JSON.parse(await fs.readFile(path.join(recordings, 'settings.json'), 'utf8'));
   assert.equal(saved.theme, 'amber');
   report.settingsPersisted = true;
+  app = await electron.launch({ executablePath, args: ['--mute-audio'], env, timeout: 45000 });
+  const reopened = await app.firstWindow();
+  reopened.on('pageerror', (error) => report.errors.push(error.message));
+  await reopened.waitForFunction(() => window.ecloneDiagnostics?.().settings.theme === 'amber');
+  assert.equal(
+    await reopened.locator('#sceneSelect option').filter({ hasText: 'Packaged scene' }).count(),
+    1,
+  );
+  await reopened.locator('#sceneSelect').selectOption('Packaged scene');
+  await reopened.waitForFunction(() => window.ecloneDiagnostics().settings.theme === 'amber');
+  report.sceneSurvivedRestart = true;
+  await app.close();
+  app = null;
   assert.deepEqual(report.errors, []);
   console.log(JSON.stringify({ passed: true, ...report }, null, 2));
 } finally {
