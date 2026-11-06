@@ -1,16 +1,18 @@
 # EClone Piano
 
-**연주를 빛으로. · By EClone Games**
+MIDI 건반 연주를 화면에 그리는 Windows 앱입니다. OBS 방송 화면, 녹음 후 다시 꾸미는 연주 영상, 클릭이 통과하는 데스크톱 오버레이로 사용할 수 있습니다. EClone Games에서 만듭니다.
 
-A local MIDI visualization and performance recording studio for Windows. Create transparent OBS scenes, replay and restyle performances, and enjoy a click-through desktop overlay.
+A local MIDI visualizer and performance recorder for Windows, with OBS scenes, replay styling, and a click-through desktop overlay.
 
 [![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4)](#windows-설치)
 [![License: MIT](https://img.shields.io/badge/License-MIT-teal.svg)](LICENSE)
 [![Checks](https://github.com/EcchiClone/eclone-piano/actions/workflows/checks.yml/badge.svg)](https://github.com/EcchiClone/eclone-piano/actions/workflows/checks.yml)
 
-![EClone Piano 스튜디오: 연주 미리보기, 녹음, 장면 디자인](docs/images/studio-aurora.png)
+[Windows 설치 파일 다운로드](https://github.com/EcchiClone/eclone-piano/releases/latest) · [처음 사용하는 분](docs/END_USER.md) · [Kontakt 연결](docs/SETUP.md)
 
-MIDI 건반 연주를 빛과 입자로 표현하는 **Windows 로컬 앱**입니다. 방송에서는 투명한 피아노 화면으로, 녹음 후에는 다시 꾸밀 수 있는 연주 영상으로, 평소에는 작업 화면 위의 오버레이로 사용합니다. 계정이나 클라우드 업로드 없이 연주 파일을 PC에 보관합니다.
+![EClone Piano 스튜디오: 위쪽의 MIDI 연결·녹음, 연주 미리보기, 오른쪽의 장면 설정](docs/images/studio-aurora.png)
+
+계정 없이 실행하고 연주 파일을 PC에 보관합니다. 피아노 음원은 포함하지 않습니다. 실제 소리와 원음 녹음에는 Kontakt와 사용할 악기가 필요합니다.
 
 ## 무엇을 할 수 있나요?
 
@@ -20,7 +22,7 @@ MIDI 건반 연주를 빛과 입자로 표현하는 **Windows 로컬 앱**입니
 | **녹음과 영상 편집** | MIDI 이벤트와 Kontakt 원음 동시 저장, 재생·탐색·디자인 변경, 하강형 노트, 1080p / 60fps MP4 |
 | **데스크톱 감상**    | 모니터 선택, 항상 위·클릭 통과 오버레이, 노트와 건반의 개별 불투명도, 건반 숨기기           |
 
-Aurora / Golden / Violet 테마, 글로우·파티클, 음 이름, 88 / 61 / 49 / 37건반 범위를 제공합니다. 저장한 연주는 WAV·MIDI·세션 JSON으로 내보낼 수 있으며, 삭제한 원본은 앱 휴지통에 보관합니다.
+Aurora / Golden / Violet 테마와 직접 색상 지정, 글로우·파티클·타건 반응, 음 이름, 건반 높이와 표시 범위를 조절할 수 있습니다. 디자인은 이름을 붙여 저장하거나 장면 파일로 공유합니다. 저장한 연주는 검색·정렬하고 WAV·MIDI·세션 JSON으로 내려받을 수 있습니다.
 
 ![Golden 테마의 하강형 노트: 저장된 연주를 영상으로 다시 꾸미는 예시](docs/images/stage-golden.png)
 
@@ -35,6 +37,9 @@ _스크린샷은 앱에서 만든 데모 장면입니다. 데모는 무음이며
 Electron·Node.js·.NET 오디오 도우미·FFmpeg·FFprobe가 포함되어 개발 도구를 따로 설치하지 않아도 됩니다. 업데이트된 Windows 10 22H2 / Windows 11 x64를 지원합니다. Kontakt·피아노 음원·건반 드라이버·loopMIDI는 별도로 준비합니다. **[설치본 사용자 가이드](docs/END_USER.md)**
 
 서명 인증서가 없는 배포본이며, SHA256SUMS.txt로 파일을 확인할 수 있습니다. 앱은 사용자 폴더에 연주를 보관하므로 업데이트 시 프로그램 파일을 교체할 수 있습니다.
+
+<details>
+<summary>소스에서 실행하기: 개발 도구와 설치 순서</summary>
 
 ## 소스에서 실행할 때의 준비물
 
@@ -84,6 +89,8 @@ Electron·Node.js·.NET 오디오 도우미·FFmpeg·FFprobe가 포함되어 개
 
 브라우저 전용 모드는 `npm run serve` → <http://127.0.0.1:3210>입니다. 데스크톱 앱과 브라우저 전용 서버 중 **하나만 실행**하세요. 실행 중인 데스크톱 앱의 같은 주소를 브라우저에서 여는 것은 가능합니다. 전체 모니터 오버레이는 데스크톱 앱에서 지원합니다.
 
+</details>
+
 ## 건반 → Kontakt → EClone Piano 연결
 
 MIDI는 **어떤 음을 언제 눌렀는지**를 전달합니다. 소리는 Kontakt에서 별도로 녹음합니다.
@@ -104,7 +111,7 @@ flowchart LR
 3. **MIDI → Outputs**에서 **EClone Piano: On**으로 설정합니다.
 4. **Engine → Send MIDI to outside world**에서 **Incoming notes**, **Incoming CCs**를 켭니다. Kontakt 화면 건반도 표시하려면 **GUI keyboard**도 켭니다. `Script generated notes / CCs`는 악기 스크립트 출력을 보고 싶을 때만 켭니다.
 5. EClone Piano의 **MIDI INPUT → 새로고침 → EClone Piano → 연결**을 누릅니다.
-6. 건반을 눌렀다 떼고, 서스테인 페달도 밟았다 떼어 봅니다. 이벤트 수가 증가하고 노트가 끝나면 MIDI 연결이 된 것입니다. **짧은 테스트 녹음을 시작했을 때 입력 미터까지 반응하면 원음 연결도 확인됩니다.**
+6. 건반을 눌렀다 떼고, 서스테인 페달도 밟았다 떼어 봅니다. 노트가 나타났다가 끝나면 MIDI 연결이 된 것입니다. 짧은 테스트 녹음을 시작했을 때 입력 미터까지 반응하면 원음 연결도 확인됩니다.
 
 가상 포트 이름은 자유롭습니다. 이전 버전에서 만든 `Luma Piano` 포트도 그대로 사용할 수 있으며, 기존 녹음·디자인·장치 설정도 유지됩니다. 새 포트가 Kontakt에 보이지 않으면 악기 상태를 저장한 뒤 Kontakt를 재실행하세요. 자세한 순서와 일반 MIDI 건반 직접 연결은 [설치·연결 가이드](docs/SETUP.md)를 참고하세요. [Kontakt 공식 옵션 설명](https://docs.native-instruments.com/online-guides/kontakt-manual/en/options-dialog)
 
@@ -135,9 +142,11 @@ OBS **소스 → + → 브라우저**에서 `로컬 파일`을 끄고 설정합�
 
 재생은 저장한 WAV를 사용합니다. MIDI만 있는 연주와 데모는 무음입니다. Kontakt 악기를 바꿔 원음을 다시 합성하는 기능은 없습니다. 스튜디오를 여러 개 열었을 때는 **재생을 시작한 스튜디오 한 곳에서만 소리**가 나며, 그 창이 연결을 잃으면 재생을 멈춥니다. 명시적으로 켠 OBS `audio=1`은 별도 출력입니다.
 
+재생 줄의 음량·음소거는 이 창에서 듣는 소리에만 적용합니다. 원본 WAV와 내보내는 MP4의 음량은 바뀌지 않습니다. 연주 목록에서 이름으로 검색하거나 원음 유무로 걸러 보고 이름·최근 저장·길이순으로 정렬할 수 있습니다. 파일 다운로드는 각 연주의 **다운로드** 메뉴에 있습니다.
+
 ### 3. 데스크톱 오버레이
 
-데스크톱 앱에서 모니터를 고르고 **데스크톱 오버레이**를 누릅니다. 다른 프로그램 위에 표시되며 건반 영역까지 마우스 클릭이 통과합니다.
+데스크톱 앱 오른쪽의 **오버레이** 탭에서 모니터를 고르고 **오버레이 켜기**를 누릅니다. 다른 프로그램 위에 표시되며 건반 영역까지 마우스 클릭이 통과합니다. 켜짐 상태는 탭 안에 표시합니다.
 
 - **노트 불투명도 / 건반 불투명도**를 각각 조절합니다. 초기값은 `60% / 18%`입니다.
 - **오버레이 건반 표시**를 끄면 화면 맨 아래에서 노트만 올라옵니다.
@@ -145,6 +154,17 @@ OBS **소스 → + → 브라우저**에서 `로컬 파일`을 끄고 설정합�
 - **Ctrl + Shift + F12**: 오버레이 닫고 스튜디오로 돌아오기.
 
 오버레이 전용 불투명도는 OBS와 MP4에 영향을 주지 않습니다. 다른 앱이 단축키를 먼저 사용한 경우 스튜디오 버튼으로 닫을 수 있습니다.
+
+## 장면 꾸미기와 저장
+
+오른쪽 **장면 디자인** 탭에서 바꿉니다. 설정은 연결된 미리보기와 OBS·오버레이에 바로 반영됩니다.
+
+- **빛의 색:** 세 테마 중 고르거나 **직접 색상**으로 원하는 색을 지정합니다.
+- **빛과 입자:** 파티클·글로우·타건 반응을 조절합니다. 타건 반응을 `0%`로 두면 타건 순간의 빛 파동을 끕니다.
+- **건반과 범위:** 88 / 61 / 49 / 37건반 또는 직접 지정한 음역을 표시합니다. **연주에 맞추기**는 현재 연주의 음역을 화면에 맞춥니다. 표시 범위만 바뀌며 MIDI 음높이는 유지합니다.
+- **장면 저장:** 이름을 붙여 최대 12개까지 보관합니다. 같은 이름으로 저장하면 교체합니다. 옆의 `…` 메뉴에서 장면 파일 내보내기·가져오기·목록에서 삭제·디자인 초기화를 할 수 있습니다.
+
+장면 목록과 재생 음량은 현재 앱 또는 브라우저 프로필에 저장합니다. 다른 브라우저나 PC로 옮길 때는 장면 JSON을 내보내고 가져오세요. 장면 파일에는 디자인 설정만 담으며 녹음 파일과 녹음 샘플레이트는 담지 않습니다.
 
 ## 연주 파일과 백업
 
@@ -176,7 +196,7 @@ OBS **소스 → + → 브라우저**에서 `로컬 파일`을 끄고 설정합�
 | 영상 생성이 느리거나 실패함           | FFmpeg·FFprobe와 H.264 인코더 지원을 확인합니다. 데스크톱 앱에서 시도하고, 렌더링이 끝날 때까지 앱을 유지합니다. |
 | 실행 시 포트 사용 중 오류             | `3210`을 쓰는 다른 EClone Piano 앱/서버를 종료합니다.                                                            |
 
-[자세한 설치·연결](docs/SETUP.md) · [프로젝트 구조·개발 및 테스트](docs/DEVELOPMENT.md) · [검증 범위](docs/VALIDATION.md)
+[자세한 설치·연결](docs/SETUP.md) · [프로젝트 구조·개발 및 테스트](docs/DEVELOPMENT.md) · [검증 범위](docs/VALIDATION.md) · [사용성 검토와 개선 후보](docs/UX-REVIEW.md)
 
 ## 개발과 라이선스
 

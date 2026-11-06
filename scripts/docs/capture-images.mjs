@@ -107,7 +107,7 @@ try {
     executablePath: browserExecutablePath(process.env.ECLONE_DOC_BROWSER),
   });
   const studio = await browser.newPage({
-    viewport: { width: 1440, height: 1100 },
+    viewport: { width: 1440, height: 960 },
     deviceScaleFactor: 1,
   });
   studio.on('pageerror', (error) => errors.push(error.message));
@@ -153,7 +153,17 @@ try {
     await studio.evaluate(() => document.documentElement.scrollWidth > innerWidth),
     false,
   );
-  await studio.screenshot({ path: path.join(output, 'studio-aurora.png'), fullPage: true });
+  await studio.locator('#saveScene').click();
+  await studio.locator('#sceneName').fill('방송용 · Aurora');
+  await studio.locator('#confirmSceneSave').click();
+  await studio.waitForFunction(
+    () => !document.getElementById('toast').classList.contains('visible'),
+  );
+  await studio.screenshot({ path: path.join(output, 'studio-aurora.png') });
+  await studio.locator('#overlayTab').click();
+  await studio.waitForTimeout(200); // Let the tab's color transition finish before capture.
+  await studio.screenshot({ path: path.join(output, 'studio-overlay.png') });
+  await studio.locator('#sceneTab').click();
 
   await setting('theme', 'amber', () => studio.locator('[data-theme="amber"]').click());
   await setting('direction', 'down', () => studio.locator('[data-direction="down"]').click());
@@ -198,10 +208,12 @@ try {
   });
   assert.deepEqual(errors, []);
   const report = await Promise.all(
-    ['studio-aurora.png', 'stage-golden.png', 'stage-transparent.png'].map(async (name) => ({
-      name,
-      bytes: (await fs.stat(path.join(output, name))).size,
-    })),
+    ['studio-aurora.png', 'studio-overlay.png', 'stage-golden.png', 'stage-transparent.png'].map(
+      async (name) => ({
+        name,
+        bytes: (await fs.stat(path.join(output, name))).size,
+      }),
+    ),
   );
   console.log(
     JSON.stringify(

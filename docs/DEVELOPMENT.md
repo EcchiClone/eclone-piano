@@ -4,22 +4,23 @@
 
 ## 구조
 
-| 경로                   | 역할                                                           |
-| ---------------------- | -------------------------------------------------------------- |
-| `public/`              | 스튜디오 UI, Canvas 렌더러, WebCodecs 영상 인코딩              |
-| `server/`              | 로컬 HTTP/WebSocket 서버, MIDI 상태, 녹음·재생·파일 관리       |
-| `desktop/`             | Electron 스튜디오와 클릭 통과 오버레이                         |
-| `shared/paths.cjs`     | 서버·데스크톱·도구에서 함께 쓰는 프로젝트/네이티브 실행 경로   |
-| `native/midi/`         | Windows PowerShell에서 실행하는 C# WinMM MIDI 브리지           |
-| `native/audio/`        | .NET 9 x64 WASAPI 오디오 도우미. bin/obj는 빌드 산출물         |
-| `scripts/doctor.mjs`   | 설치 환경과 기능별 준비 상태 진단                              |
-| `scripts/diagnostics/` | 실제 장치 확인·짧은 진단 녹음·기존 WAV 분석                    |
-| `scripts/docs/`        | 합성 데모를 사용한 README 스크린샷 생성                        |
-| `scripts/lib/`         | 브라우저 선택과 임시 산출물 경로의 공통 코드                   |
-| `tests/`               | unit / integration / ui / export / desktop 검사와 공통 fixture |
-| `docs/`                | 설치·개발·검증 가이드, 공개용 이미지                           |
-| `recordings/`          | 사용자 연주와 설정. Git 추적 제외                              |
-| `.runtime/`            | 개발 산출물과 과거 진단 자료. Git 추적 제외                    |
+| 경로                                      | 역할                                                           |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| `public/`                                 | 스튜디오 UI, Canvas 렌더러, WebCodecs 영상 인코딩              |
+| `public/settings.js`, `public/presets.js` | 설정 검증·기본값, 프로필별 장면 저장·교환                      |
+| `server/`                                 | 로컬 HTTP/WebSocket 서버, MIDI 상태, 녹음·재생·파일 관리       |
+| `desktop/`                                | Electron 스튜디오와 클릭 통과 오버레이                         |
+| `shared/paths.cjs`                        | 서버·데스크톱·도구에서 함께 쓰는 프로젝트/네이티브 실행 경로   |
+| `native/midi/`                            | Windows PowerShell에서 실행하는 C# WinMM MIDI 브리지           |
+| `native/audio/`                           | .NET 9 x64 WASAPI 오디오 도우미. bin/obj는 빌드 산출물         |
+| `scripts/doctor.mjs`                      | 설치 환경과 기능별 준비 상태 진단                              |
+| `scripts/diagnostics/`                    | 실제 장치 확인·짧은 진단 녹음·기존 WAV 분석                    |
+| `scripts/docs/`                           | 합성 데모를 사용한 README 스크린샷 생성                        |
+| `scripts/lib/`                            | 브라우저 선택과 임시 산출물 경로의 공통 코드                   |
+| `tests/`                                  | unit / integration / ui / export / desktop 검사와 공통 fixture |
+| `docs/`                                   | 설치·개발·검증 가이드, 공개용 이미지                           |
+| `recordings/`                             | 사용자 연주와 설정. Git 추적 제외                              |
+| `.runtime/`                               | 개발 산출물과 과거 진단 자료. Git 추적 제외                    |
 
 [검사 구성과 실행 명령](../tests/README.md) · [수동 진단 도구](../scripts/diagnostics/README.md)
 
@@ -81,6 +82,8 @@ GitHub Actions는 Windows에서 의존성 설치, 문법·단위·서버 검사,
 - 녹음 샘플레이트는 소스와 맞춥니다. 시스템 시계의 작은 오차를 보정하려고 PCM 중간에 반복적인 무음을 삽입하지 않습니다.
 - 라이브 피아노는 재타건과 채널별 서스테인을 처리합니다. 오래 누른 음을 임의의 시간 제한으로 제거하지 않습니다.
 - 저장한 연주의 소리는 명시적으로 재생을 시작한 스튜디오에서 한 번만 출력합니다. OBS `audio=1`은 별도 사용자 선택입니다.
+- 화면 설정은 서버에서도 허용된 타입과 범위를 검증합니다. 장면 파일은 시각 설정만 포함하고 녹음 샘플레이트는 제외합니다. 브라우저 저장소가 차단된 경우에도 앱이 시작되어야 합니다.
+- 타건 효과는 재생 시각으로 계산해 탐색·영상 내보내기에서 같은 프레임을 재현합니다. 무작위 시각 효과를 넣을 때도 이 성질을 유지합니다.
 - MP4는 `frameIndex / 60` 시점마다 렌더링합니다. 실시간 화면 캡처의 누락 프레임을 복제로 채우지 않습니다. 완료 전에 실제 프레임 수를 확인합니다.
 - 녹음·삭제·다운로드·내보내기의 파일 경합과 종료 시 정리를 유지합니다. 사용자 연주는 테스트 fixture로 사용하지 않습니다.
 - 서버는 로컬 루프백만 사용합니다. 새로운 원격 접근이나 클라우드 업로드는 별도 설계가 필요합니다.
